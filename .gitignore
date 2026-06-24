@@ -3,6 +3,7 @@
 .env
 .env.*
 !.env.example
+!.env.cpanel.example
 !.env.testing
 *.log
 /storage/app/ocr/

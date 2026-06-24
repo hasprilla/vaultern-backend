@@ -21,7 +21,7 @@ class RegisterRequest extends FormRequest
             'name'     => ['required', 'string', 'min:2', 'max:120'],
             'email'    => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
             'password' => ['required', 'string', 'min:8'],
-            'role'     => ['required', 'string', Rule::in(array_column(FamilyRole::cases(), 'value'))],
+            'role'     => ['required', 'string', Rule::in(['padre', 'madre'])],
         ];
     }
 }
