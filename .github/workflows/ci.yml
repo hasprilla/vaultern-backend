@@ -1,0 +1,86 @@
+name: Vaultern CI Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  laravel-tests:
+    name: Laravel Tests + Coverage
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: secret
+          MYSQL_DATABASE: vaultern_test
+        ports: ['3306:3306']
+        options: --health-cmd="mysqladmin ping" --health-interval=10s
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo, pdo_mysql, redis, bcmath, gd
+          coverage: xdebug
+      - run: composer install --no-interaction --prefer-dist
+      - run: cp .env.testing .env
+      - run: php artisan key:generate
+      - run: php artisan migrate --force
+      - run: php artisan test --coverage --min=80
+
+  security-scan:
+    name: Security SAST Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: composer install --no-interaction
+      - name: PHP Security Checker
+        uses: symfonycorp/security-checker-action@v5
+
+  flutter-tests:
+    name: Flutter Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: zumifly_flutter
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.27.4'
+      - run: flutter pub get
+        working-directory: zumifly_flutter
+      - run: flutter analyze
+        working-directory: zumifly_flutter
+      - run: flutter test --coverage
+        working-directory: zumifly_flutter
+
+  deploy-staging:
+    name: Deploy to Staging
+    needs: [laravel-tests, security-scan]
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build & Push Docker Image
+        run: |
+          docker build -t vaultern:staging .
+          aws ecr get-login-password | docker login --username AWS --password-stdin $ECR_REGISTRY
+          docker push $ECR_REGISTRY/vaultern:staging
+      - name: Deploy ECS
+        run: aws ecs update-service --cluster vaultern-staging --service vaultern-app --force-new-deployment
+
+  deploy-production:
+    name: Deploy to Production
+    needs: [laravel-tests, security-scan, flutter-tests]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - run: kubectl apply -f kubernetes/ --namespace=vaultern-prod

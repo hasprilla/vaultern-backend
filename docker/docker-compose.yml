@@ -1,0 +1,72 @@
+version: "3.9"
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: vaultern_app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ..:/var/www/html
+      - ./nginx:/etc/nginx/conf.d
+    depends_on:
+      - mysql
+      - redis
+    environment:
+      - APP_ENV=local
+      - APP_KEY=${APP_KEY}
+      - DB_HOST=mysql
+      - REDIS_HOST=redis
+
+  mysql:
+    image: mysql:8.0
+    container_name: vaultern_mysql
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: vaultern_db
+      MYSQL_USER: vaultern
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  redis:
+    image: redis:7-alpine
+    container_name: vaultern_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  horizon:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: vaultern_horizon
+    restart: unless-stopped
+    command: php artisan horizon
+    depends_on:
+      - mysql
+      - redis
+
+  reverb:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: vaultern_reverb
+    restart: unless-stopped
+    command: php artisan reverb:start
+    ports:
+      - "8080:8080"
+    depends_on:
+      - redis
+
+volumes:
+  mysql_data:
+  redis_data:
