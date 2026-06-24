@@ -41,7 +41,6 @@ class User extends Authenticatable
             'password'          => 'hashed',
             'mfa_enabled'       => 'boolean',
             'mfa_secret'        => 'encrypted',
-            'device_fingerprint'=> 'encrypted',
         ];
     }
 

@@ -85,6 +85,28 @@ class AuthApiTest extends TestCase
         $response->assertStatus(401);
     }
 
+    public function test_login_with_device_id_succeeds_after_register(): void
+    {
+        $email = 'login-device@zumifly.app';
+
+        $this->postJson('/api/v1/auth/register', [
+            'name'     => 'Device Test',
+            'email'    => $email,
+            'password' => 'SecurePass123!',
+            'role'     => 'padre',
+        ])->assertCreated();
+
+        $this->postJson('/api/v1/auth/login', [
+            'email'     => $email,
+            'password'  => 'SecurePass123!',
+            'device_id' => '550e8400-e29b-41d4-a716-446655440000',
+        ])
+            ->assertOk()
+            ->assertJsonStructure([
+                'data' => ['access_token', 'refresh_token', 'user'],
+            ]);
+    }
+
     public function test_me_endpoint_requires_authentication(): void
     {
         $this->getJson('/api/v1/auth/me')->assertStatus(401);

@@ -19,7 +19,7 @@ class UserResource extends JsonResource
             'role'            => $this->role,
             'family_id'       => $this->family_id,
             'avatar'          => $this->avatar,
-            'mfa_enabled'     => $this->mfa_enabled,
+            'mfa_enabled'     => (bool) $this->mfa_enabled,
             'email_verified'  => $this->email_verified_at !== null,
             'created_at'      => $this->created_at?->toIso8601String(),
         ];
