@@ -1,4 +1,4 @@
-/vendor/
+# vendor/ incluido en el repo para despliegue en cPanel (sin composer en servidor)
 /node_modules/
 .env
 .env.*
