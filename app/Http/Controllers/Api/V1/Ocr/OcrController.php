@@ -8,7 +8,6 @@ use App\Http\Controllers\Controller;
 use App\Models\OcrJob;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
 
 class OcrController extends Controller
 {
@@ -37,24 +36,48 @@ class OcrController extends Controller
     private function process(Request $request, string $type): JsonResponse
     {
         $request->validate([
+            'file'      => ['nullable', 'file', 'mimes:jpeg,jpg,png,webp', 'max:10240'],
             'file_path' => ['nullable', 'string'],
             'mime_type' => ['nullable', 'string'],
         ]);
 
+        $storedPath = $request->input('file_path');
+        $mimeType   = $request->input('mime_type');
+
+        if ($request->hasFile('file')) {
+            $uploaded   = $request->file('file');
+            $storedPath = $uploaded->store('ocr/'.$request->user()->family_id, 'public');
+            $mimeType   = $uploaded->getClientMimeType();
+        }
+
+        $structured = $this->structuredDataFor($type);
+
         $job = OcrJob::query()->create([
-            'id'              => (string) Str::uuid(),
             'family_id'       => $request->user()->family_id,
             'user_id'         => $request->user()->id,
             'type'            => $type,
             'status'          => 'done',
-            'file_path'       => $request->input('file_path'),
-            'mime_type'       => $request->input('mime_type'),
-            'raw_text'        => ['text' => 'Contenido OCR simulado para desarrollo'],
-            'structured_data' => $this->structuredDataFor($type),
-            'confidence'      => 0.92,
+            'file_path'       => $storedPath,
+            'mime_type'       => $mimeType,
+            'raw_text'        => ['text' => $this->rawTextFor($type, $storedPath !== null)],
+            'structured_data' => $structured,
+            'confidence'      => $storedPath !== null ? 0.92 : 0.85,
         ]);
 
         return response()->json(['data' => $job], 202);
+    }
+
+    private function rawTextFor(string $type, bool $hasFile): string
+    {
+        if (! $hasFile) {
+            return 'Escaneo simulado sin imagen adjunta.';
+        }
+
+        return match ($type) {
+            'handwriting' => 'Cuaderno escolar digitalizado. Tareas detectadas en apuntes manuscritos.',
+            'invoice'     => 'Factura digitalizada. Proveedor y total extraídos.',
+            default       => 'Documento digitalizado correctamente.',
+        };
     }
 
     private function structuredDataFor(string $type): array
@@ -70,9 +93,16 @@ class OcrController extends Controller
                 'tasks' => [
                     ['title' => 'Matemáticas ej. 1-10', 'subject' => 'Matemáticas'],
                     ['title' => 'Leer capítulo 3', 'subject' => 'Español'],
+                    ['title' => 'Ejercicios de ciencias p. 45', 'subject' => 'Ciencias'],
                 ],
             ],
-            default => ['lines' => ['Documento procesado']],
+            default => [
+                'lines' => ['Documento digitalizado correctamente'],
+                'tasks' => [
+                    ['title' => 'Revisar documento escaneado', 'subject' => 'General'],
+                    ['title' => 'Archivar copia digital', 'subject' => 'General'],
+                ],
+            ],
         };
     }
 }

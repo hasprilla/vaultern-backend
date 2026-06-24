@@ -34,8 +34,8 @@ class OcrJob extends Model
     protected function casts(): array
     {
         return [
-            'raw_text'        => 'encrypted:array',
-            'structured_data' => 'encrypted:array',
+            'raw_text'        => 'array',
+            'structured_data' => 'array',
             'confidence'      => 'float',
         ];
     }

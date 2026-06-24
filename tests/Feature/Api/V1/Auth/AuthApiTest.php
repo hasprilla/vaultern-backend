@@ -42,7 +42,7 @@ class AuthApiTest extends TestCase
                  ->assertJsonValidationErrors(['role']);
     }
 
-    public function test_join_registers_child_with_invite_code(): void
+    public function test_join_registers_second_parent_with_invite_code(): void
     {
         $parent = $this->postJson('/api/v1/auth/register', [
             'name'     => 'Padre Test',
@@ -55,13 +55,37 @@ class AuthApiTest extends TestCase
         $inviteCode = \App\Models\Family::query()->find($familyId)->invite_code;
 
         $this->postJson('/api/v1/auth/join', [
+            'name'        => 'Madre Test',
+            'email'       => 'madre@zumifly.app',
+            'password'    => 'SecurePass123!',
+            'invite_code' => $inviteCode,
+            'role'        => 'madre',
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.user.role', 'madre');
+    }
+
+    public function test_join_rejects_hijo_role(): void
+    {
+        $parent = $this->postJson('/api/v1/auth/register', [
+            'name'     => 'Padre Test',
+            'email'    => 'padre2@zumifly.app',
+            'password' => 'SecurePass123!',
+            'role'     => 'padre',
+        ])->assertCreated();
+
+        $familyId = $parent->json('data.user.family_id');
+        $inviteCode = \App\Models\Family::query()->find($familyId)->invite_code;
+
+        $this->postJson('/api/v1/auth/join', [
             'name'        => 'Hijo Test',
             'email'       => 'hijo@zumifly.app',
             'password'    => 'SecurePass123!',
             'invite_code' => $inviteCode,
+            'role'        => 'hijo',
         ])
-            ->assertCreated()
-            ->assertJsonPath('data.user.role', 'hijo');
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['role']);
     }
 
     public function test_register_requires_valid_role(): void

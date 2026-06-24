@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Api\V1\Family;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\Family\CreateFamilyRequest;
 use App\Http\Requests\Api\V1\Family\InviteMemberRequest;
+use App\Http\Requests\Api\V1\Family\RegisterChildRequest;
 use App\Http\Resources\Api\V1\UserResource;
 use App\Models\Family;
 use App\Models\FamilyMember;
@@ -123,6 +124,33 @@ class FamilyController extends Controller
                 'status' => 'pending',
             ],
         ], 202);
+    }
+
+    public function registerChild(RegisterChildRequest $request, string $family): JsonResponse
+    {
+        $this->assertFamilyAccess($request, $family);
+
+        if (! $request->user()->familyRole()->canInviteMembers()) {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
+        $child = User::query()->create([
+            'name'      => $request->validated('name'),
+            'email'     => $request->validated('email'),
+            'password'  => $request->validated('password'),
+            'role'      => 'hijo',
+            'family_id' => $family,
+        ]);
+
+        FamilyMember::query()->create([
+            'id'        => (string) Str::uuid(),
+            'family_id' => $family,
+            'user_id'   => $child->id,
+            'role'      => 'hijo',
+            'status'    => 'active',
+        ]);
+
+        return response()->json(['data' => new UserResource($child)], 201);
     }
 
     public function assignRole(Request $request, string $family, string $member): JsonResponse

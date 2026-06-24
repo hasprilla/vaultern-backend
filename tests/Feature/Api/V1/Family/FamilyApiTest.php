@@ -41,4 +41,18 @@ class FamilyApiTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.id', $family->id);
     }
+
+    public function test_authenticated_parent_can_register_child(): void
+    {
+        ['user' => $user, 'family' => $family, 'tokens' => $tokens] = $this->createUserWithFamily();
+
+        $this->postJson("/api/v1/families/{$family->id}/children", [
+            'name'     => 'Lucía Test',
+            'email'    => 'lucia@zumifly.app',
+            'password' => 'SecurePass123!',
+        ], $this->authHeaders($tokens))
+            ->assertCreated()
+            ->assertJsonPath('data.role', 'hijo')
+            ->assertJsonPath('data.name', 'Lucía Test');
+    }
 }

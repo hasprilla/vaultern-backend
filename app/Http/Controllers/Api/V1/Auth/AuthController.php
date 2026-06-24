@@ -71,7 +71,7 @@ class AuthController extends Controller
             'name'      => $request->validated('name'),
             'email'     => $request->validated('email'),
             'password'  => $request->validated('password'),
-            'role'      => 'hijo',
+            'role'      => $request->validated('role'),
             'family_id' => $family->id,
         ]);
 
@@ -79,7 +79,7 @@ class AuthController extends Controller
             'id'        => (string) Str::uuid(),
             'family_id' => $family->id,
             'user_id'   => $user->id,
-            'role'      => 'hijo',
+            'role'      => $request->validated('role'),
             'status'    => 'active',
         ]);
 
