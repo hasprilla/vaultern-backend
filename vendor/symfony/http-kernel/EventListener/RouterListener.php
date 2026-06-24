@@ -183,8 +183,9 @@ class RouterListener implements EventSubscriberInterface
 
     private function createWelcomeResponse(): Response
     {
+        $version = Kernel::VERSION;
         $projectDir = realpath((string) $this->projectDir).\DIRECTORY_SEPARATOR;
-        $version = $docVersion = Kernel::MAJOR_VERSION.'.'.Kernel::MINOR_VERSION;
+        $docVersion = substr(Kernel::VERSION, 0, 3);
 
         ob_start();
         include \dirname(__DIR__).'/Resources/welcome.html.php';
