@@ -2,4 +2,4 @@
 
 use Illuminate\Support\Facades\Route;
 
-Route::get('/', fn () => response()->json(['app' => 'Vaultern API']));
+// Rutas web reservadas para futuras vistas. La raíz se expone sin middleware web en bootstrap/app.php.
