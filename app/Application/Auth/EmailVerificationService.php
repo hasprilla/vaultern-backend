@@ -8,6 +8,7 @@ use App\Mail\VerifyEmailMail;
 use App\Models\EmailVerificationCode;
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\ValidationException;
 
@@ -25,7 +26,15 @@ class EmailVerificationService
             ],
         );
 
-        Mail::to($user->email)->send(new VerifyEmailMail($user->name, $code));
+        try {
+            Mail::to($user->email)->send(new VerifyEmailMail($user->name, $code));
+        } catch (\Throwable $e) {
+            Log::error('No se pudo enviar correo de verificación', [
+                'user_id' => $user->id,
+                'email'   => $user->email,
+                'error'   => $e->getMessage(),
+            ]);
+        }
     }
 
     public function verify(string $email, string $code): User

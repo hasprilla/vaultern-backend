@@ -10,7 +10,19 @@ use App\Http\Controllers\Api\V1\Ocr\OcrController;
 use App\Http\Controllers\Api\V1\Task\TaskController;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/v1/health', fn () => response()->json(['status' => 'ok', 'app' => 'Vaultern API v1']));
+Route::get('/v1/health', function () {
+    $payload = ['status' => 'ok', 'app' => 'Vaultern API v1'];
+
+    try {
+        \Illuminate\Support\Facades\DB::connection()->getPdo();
+        $payload['database'] = 'ok';
+    } catch (\Throwable) {
+        $payload['status'] = 'degraded';
+        $payload['database'] = 'error';
+    }
+
+    return response()->json($payload, $payload['status'] === 'ok' ? 200 : 503);
+});
 
 Route::prefix('v1/auth')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
