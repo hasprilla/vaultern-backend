@@ -19,6 +19,8 @@ class LoginRequest extends FormRequest
             'email'     => ['required', 'string', 'email'],
             'password'  => ['required', 'string'],
             'device_id' => ['nullable', 'string', 'max:255'],
+            'platform'  => ['nullable', 'string', 'in:android,ios,web'],
+            'fcm_token' => ['nullable', 'string', 'max:512'],
         ];
     }
 }

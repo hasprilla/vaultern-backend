@@ -124,11 +124,18 @@ class AuthApiTest extends TestCase
             'email'     => $email,
             'password'  => 'SecurePass123!',
             'device_id' => '550e8400-e29b-41d4-a716-446655440000',
+            'platform'  => 'android',
         ])
             ->assertOk()
             ->assertJsonStructure([
                 'data' => ['access_token', 'refresh_token', 'user'],
             ]);
+
+        $this->assertDatabaseHas('devices', [
+            'device_fingerprint' => '550e8400-e29b-41d4-a716-446655440000',
+            'platform'           => 'android',
+            'is_trusted'         => true,
+        ]);
     }
 
     public function test_me_endpoint_requires_authentication(): void

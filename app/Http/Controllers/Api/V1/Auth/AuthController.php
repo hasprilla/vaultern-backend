@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1\Auth;
 
+use App\Application\Auth\DeviceRegistrationService;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\Auth\JoinFamilyRequest;
 use App\Http\Requests\Api\V1\Auth\LoginRequest;
@@ -21,7 +22,10 @@ use Illuminate\Support\Str;
 
 class AuthController extends Controller
 {
-    public function __construct(private readonly TokenService $tokens) {}
+    public function __construct(
+        private readonly TokenService $tokens,
+        private readonly DeviceRegistrationService $devices,
+    ) {}
 
     public function register(RegisterRequest $request): JsonResponse
     {
@@ -102,7 +106,12 @@ class AuthController extends Controller
         }
 
         if ($request->validated('device_id')) {
-            $user->update(['device_fingerprint' => $request->validated('device_id')]);
+            $this->devices->register(
+                $user,
+                $request->validated('device_id'),
+                $request->validated('platform'),
+                $request->validated('fcm_token'),
+            );
         }
 
         $tokenData = $this->tokens->issue($user);
