@@ -5,11 +5,14 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1\Auth;
 
 use App\Application\Auth\DeviceRegistrationService;
+use App\Application\Auth\EmailVerificationService;
 use App\Application\Family\FamilyJoinRequestService;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\Auth\JoinFamilyRequest;
 use App\Http\Requests\Api\V1\Auth\LoginRequest;
 use App\Http\Requests\Api\V1\Auth\RegisterRequest;
+use App\Http\Requests\Api\V1\Auth\ResendVerificationRequest;
+use App\Http\Requests\Api\V1\Auth\VerifyEmailRequest;
 use App\Http\Resources\Api\V1\SessionResource;
 use App\Http\Resources\Api\V1\UserResource;
 use App\Infrastructure\Auth\TokenService;
@@ -27,6 +30,7 @@ class AuthController extends Controller
         private readonly TokenService $tokens,
         private readonly DeviceRegistrationService $devices,
         private readonly FamilyJoinRequestService $joinRequests,
+        private readonly EmailVerificationService $emailVerification,
     ) {}
 
     public function register(RegisterRequest $request): JsonResponse
@@ -53,6 +57,24 @@ class AuthController extends Controller
             'status'    => 'active',
         ]);
 
+        $this->emailVerification->send($user);
+
+        return response()->json([
+            'message' => 'Revisa tu correo e ingresa el código de verificación.',
+            'data'    => [
+                'requires_verification' => true,
+                'email'                 => $user->email,
+            ],
+        ], 201);
+    }
+
+    public function verifyEmail(VerifyEmailRequest $request): JsonResponse
+    {
+        $user = $this->emailVerification->verify(
+            $request->validated('email'),
+            $request->validated('code'),
+        );
+
         $tokenData = $this->tokens->issue($user);
 
         return response()->json([
@@ -60,7 +82,24 @@ class AuthController extends Controller
                 ...$tokenData,
                 'user' => $user,
             ]),
-        ], 201);
+        ]);
+    }
+
+    public function resendVerification(ResendVerificationRequest $request): JsonResponse
+    {
+        $user = User::query()->where('email', $request->validated('email'))->first();
+
+        if ($user === null) {
+            return response()->json(['message' => 'Si el email existe, enviaremos un nuevo código.']);
+        }
+
+        if ($user->email_verified_at !== null) {
+            return response()->json(['message' => 'Esta cuenta ya está verificada.']);
+        }
+
+        $this->emailVerification->send($user);
+
+        return response()->json(['message' => 'Código reenviado. Revisa tu bandeja de entrada.']);
     }
 
     public function join(JoinFamilyRequest $request): JsonResponse
@@ -105,6 +144,13 @@ class AuthController extends Controller
         if ($user->role === 'hijo') {
             return response()->json([
                 'message' => 'Los hijos no acceden a la app. Solo padres y madres gestionan la familia.',
+            ], 403);
+        }
+
+        if ($user->email_verified_at === null) {
+            return response()->json([
+                'message' => 'Confirma tu correo con el código enviado al registrarte.',
+                'code'    => 'email_not_verified',
             ], 403);
         }
 

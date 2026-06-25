@@ -4,12 +4,40 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Api\V1\Auth;
 
+use App\Mail\VerifyEmailMail;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Mail;
 use Tests\TestCase;
 
 class AuthApiTest extends TestCase
 {
     use RefreshDatabase;
+
+    private ?string $lastVerificationCode = null;
+
+    /** @param array<string, mixed> $payload */
+    private function registerAndVerify(array $payload): User
+    {
+        Mail::fake();
+
+        $this->postJson('/api/v1/auth/register', $payload)
+            ->assertCreated()
+            ->assertJsonPath('data.requires_verification', true);
+
+        Mail::assertSent(VerifyEmailMail::class, function (VerifyEmailMail $mail) {
+            $this->lastVerificationCode = $mail->code;
+
+            return true;
+        });
+
+        $this->postJson('/api/v1/auth/verify-email', [
+            'email' => $payload['email'],
+            'code'  => $this->lastVerificationCode,
+        ])->assertOk();
+
+        return User::query()->where('email', $payload['email'])->firstOrFail();
+    }
 
     public function test_health_endpoint_returns_ok(): void
     {
@@ -42,25 +70,39 @@ class AuthApiTest extends TestCase
                  ->assertJsonValidationErrors(['role']);
     }
 
-    public function test_join_creates_pending_request_for_approver(): void
+    public function test_register_sends_verification_email(): void
     {
-        $parent = $this->postJson('/api/v1/auth/register', [
+        Mail::fake();
+
+        $this->postJson('/api/v1/auth/register', [
             'name'     => 'Padre Test',
             'email'    => 'padre@zumifly.app',
             'password' => 'SecurePass123!',
             'role'     => 'padre',
-        ])->assertCreated();
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.requires_verification', true);
 
-        $parentId = $parent->json('data.user.id');
-        $familyId = $parent->json('data.user.family_id');
-        $inviteCode = \App\Models\Family::query()->find($familyId)->invite_code;
+        Mail::assertSent(VerifyEmailMail::class);
+    }
+
+    public function test_join_creates_pending_request_for_approver(): void
+    {
+        $parent = $this->registerAndVerify([
+            'name'     => 'Padre Test',
+            'email'    => 'padre@zumifly.app',
+            'password' => 'SecurePass123!',
+            'role'     => 'padre',
+        ]);
+
+        $inviteCode = $parent->family->invite_code;
 
         $this->postJson('/api/v1/auth/join', [
             'name'        => 'Madre Test',
             'email'       => 'madre@zumifly.app',
             'password'    => 'SecurePass123!',
             'invite_code' => $inviteCode,
-            'invited_by'  => $parentId,
+            'invited_by'  => $parent->id,
             'role'        => 'madre',
         ])
             ->assertStatus(202)
@@ -74,15 +116,14 @@ class AuthApiTest extends TestCase
 
     public function test_join_rejects_hijo_role(): void
     {
-        $parent = $this->postJson('/api/v1/auth/register', [
+        $parent = $this->registerAndVerify([
             'name'     => 'Padre Test',
             'email'    => 'padre2@zumifly.app',
             'password' => 'SecurePass123!',
             'role'     => 'padre',
-        ])->assertCreated();
+        ]);
 
-        $familyId = $parent->json('data.user.family_id');
-        $inviteCode = \App\Models\Family::query()->find($familyId)->invite_code;
+        $inviteCode = $parent->family->invite_code;
 
         $this->postJson('/api/v1/auth/join', [
             'name'        => 'Hijo Test',
@@ -116,16 +157,35 @@ class AuthApiTest extends TestCase
         $response->assertStatus(401);
     }
 
-    public function test_login_with_device_id_succeeds_after_register(): void
+    public function test_login_blocks_unverified_email(): void
+    {
+        Mail::fake();
+
+        $this->postJson('/api/v1/auth/register', [
+            'name'     => 'Unverified',
+            'email'    => 'unverified@zumifly.app',
+            'password' => 'SecurePass123!',
+            'role'     => 'padre',
+        ])->assertCreated();
+
+        $this->postJson('/api/v1/auth/login', [
+            'email'    => 'unverified@zumifly.app',
+            'password' => 'SecurePass123!',
+        ])
+            ->assertStatus(403)
+            ->assertJsonPath('code', 'email_not_verified');
+    }
+
+    public function test_login_with_device_id_succeeds_after_verification(): void
     {
         $email = 'login-device@zumifly.app';
 
-        $this->postJson('/api/v1/auth/register', [
+        $this->registerAndVerify([
             'name'     => 'Device Test',
             'email'    => $email,
             'password' => 'SecurePass123!',
             'role'     => 'padre',
-        ])->assertCreated();
+        ]);
 
         $this->postJson('/api/v1/auth/login', [
             'email'     => $email,

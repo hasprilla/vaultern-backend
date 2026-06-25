@@ -14,6 +14,8 @@ Route::get('/v1/health', fn () => response()->json(['status' => 'ok', 'app' => '
 
 Route::prefix('v1/auth')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
+    Route::post('/verify-email', [AuthController::class, 'verifyEmail']);
+    Route::post('/resend-verification', [AuthController::class, 'resendVerification']);
     Route::post('/join', [AuthController::class, 'join']);
     Route::post('/login', [AuthController::class, 'login']);
     Route::post('/mfa/verify', [MfaController::class, 'verify']);
