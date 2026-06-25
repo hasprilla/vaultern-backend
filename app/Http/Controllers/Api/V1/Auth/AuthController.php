@@ -35,6 +35,31 @@ class AuthController extends Controller
 
     public function register(RegisterRequest $request): JsonResponse
     {
+        $email = $request->validated('email');
+        $existing = User::query()->where('email', $email)->first();
+
+        if ($existing !== null && $existing->email_verified_at === null) {
+            $existing->update([
+                'name'     => $request->validated('name'),
+                'password' => $request->validated('password'),
+                'role'     => $request->validated('role'),
+            ]);
+
+            FamilyMember::query()
+                ->where('user_id', $existing->id)
+                ->update(['role' => $existing->role]);
+
+            $this->emailVerification->send($existing);
+
+            return response()->json([
+                'message' => 'Revisa tu correo e ingresa el código de verificación.',
+                'data'    => [
+                    'requires_verification' => true,
+                    'email'                 => $existing->email,
+                ],
+            ], 201);
+        }
+
         $family = Family::query()->create([
             'id'   => (string) Str::uuid(),
             'name' => $request->validated('name').' Family',

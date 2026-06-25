@@ -86,6 +86,52 @@ class AuthApiTest extends TestCase
         Mail::assertSent(VerifyEmailMail::class);
     }
 
+    public function test_register_allows_retry_for_unverified_email(): void
+    {
+        Mail::fake();
+
+        $payload = [
+            'name'     => 'Padre Test',
+            'email'    => 'retry@zumifly.app',
+            'password' => 'SecurePass123!',
+            'role'     => 'padre',
+        ];
+
+        $this->postJson('/api/v1/auth/register', $payload)->assertCreated();
+        Mail::assertSent(VerifyEmailMail::class);
+
+        $payload['name']     = 'Padre Actualizado';
+        $payload['password'] = 'NewSecurePass456!';
+
+        $this->postJson('/api/v1/auth/register', $payload)
+            ->assertCreated()
+            ->assertJsonPath('data.requires_verification', true);
+
+        $user = User::query()->where('email', $payload['email'])->firstOrFail();
+        $this->assertNull($user->email_verified_at);
+        $this->assertSame('Padre Actualizado', $user->name);
+        Mail::assertSent(VerifyEmailMail::class, 2);
+    }
+
+    public function test_register_rejects_verified_email(): void
+    {
+        $this->registerAndVerify([
+            'name'     => 'Padre Test',
+            'email'    => 'verified@zumifly.app',
+            'password' => 'SecurePass123!',
+            'role'     => 'padre',
+        ]);
+
+        $this->postJson('/api/v1/auth/register', [
+            'name'     => 'Otro Nombre',
+            'email'    => 'verified@zumifly.app',
+            'password' => 'SecurePass123!',
+            'role'     => 'padre',
+        ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['email']);
+    }
+
     public function test_join_creates_pending_request_for_approver(): void
     {
         $parent = $this->registerAndVerify([
