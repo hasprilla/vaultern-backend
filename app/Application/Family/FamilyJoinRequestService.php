@@ -62,11 +62,12 @@ class FamilyJoinRequestService
         }
 
         $user = User::query()->create([
-            'name'      => $request->name,
-            'email'     => $request->email,
-            'password'  => $request->password,
-            'role'      => $request->role,
-            'family_id' => $request->family_id,
+            'name'              => $request->name,
+            'email'             => $request->email,
+            'password'          => $request->password,
+            'role'              => $request->role,
+            'family_id'         => $request->family_id,
+            'email_verified_at' => now(),
         ]);
 
         FamilyMember::query()->create([
