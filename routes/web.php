@@ -2,4 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 
-// Rutas web reservadas para futuras vistas. La raíz se expone sin middleware web en bootstrap/app.php.
+Route::redirect('/legal', '/legal/index.html');
+Route::redirect('/privacidad', '/legal/privacidad.html');
+Route::redirect('/terminos', '/legal/terminos.html');
+Route::redirect('/tratamiento-datos', '/legal/tratamiento-datos.html');
