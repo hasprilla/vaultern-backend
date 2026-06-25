@@ -27,6 +27,9 @@ Route::prefix('v1')->middleware(['api.auth', 'tenant'])->group(function () {
     Route::apiResource('families', FamilyController::class);
     Route::post('/families/{family}/invite', [FamilyController::class, 'invite']);
     Route::post('/families/{family}/children', [FamilyController::class, 'registerChild']);
+    Route::get('/families/{family}/join-requests', [FamilyController::class, 'joinRequests']);
+    Route::post('/families/{family}/join-requests/{joinRequest}/approve', [FamilyController::class, 'approveJoinRequest']);
+    Route::post('/families/{family}/join-requests/{joinRequest}/reject', [FamilyController::class, 'rejectJoinRequest']);
     Route::post('/families/{family}/members/{member}/role', [FamilyController::class, 'assignRole']);
 
     Route::apiResource('tasks', TaskController::class);

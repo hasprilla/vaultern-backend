@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1\Auth;
 
 use App\Application\Auth\DeviceRegistrationService;
+use App\Application\Family\FamilyJoinRequestService;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\Auth\JoinFamilyRequest;
 use App\Http\Requests\Api\V1\Auth\LoginRequest;
@@ -25,6 +26,7 @@ class AuthController extends Controller
     public function __construct(
         private readonly TokenService $tokens,
         private readonly DeviceRegistrationService $devices,
+        private readonly FamilyJoinRequestService $joinRequests,
     ) {}
 
     public function register(RegisterRequest $request): JsonResponse
@@ -71,30 +73,25 @@ class AuthController extends Controller
             return response()->json(['message' => 'Código de invitación inválido'], 422);
         }
 
-        $user = User::query()->create([
-            'name'      => $request->validated('name'),
-            'email'     => $request->validated('email'),
-            'password'  => $request->validated('password'),
-            'role'      => $request->validated('role'),
-            'family_id' => $family->id,
-        ]);
+        $inviter = User::query()->findOrFail($request->validated('invited_by'));
 
-        FamilyMember::query()->create([
-            'id'        => (string) Str::uuid(),
-            'family_id' => $family->id,
-            'user_id'   => $user->id,
-            'role'      => $request->validated('role'),
-            'status'    => 'active',
-        ]);
-
-        $tokenData = $this->tokens->issue($user);
+        $joinRequest = $this->joinRequests->submit(
+            $family,
+            $inviter,
+            $request->validated('name'),
+            $request->validated('email'),
+            $request->validated('password'),
+            $request->validated('role'),
+        );
 
         return response()->json([
-            'data' => new SessionResource([
-                ...$tokenData,
-                'user' => $user,
-            ]),
-        ], 201);
+            'message' => 'Solicitud enviada. El padre o madre que te invitó debe aprobarla.',
+            'data'    => [
+                'request_id' => $joinRequest->id,
+                'status'     => 'pending',
+                'inviter'    => $inviter->only(['id', 'name']),
+            ],
+        ], 202);
     }
 
     public function login(LoginRequest $request): JsonResponse
@@ -103,6 +100,12 @@ class AuthController extends Controller
 
         if ($user === null || ! Hash::check($request->validated('password'), $user->password)) {
             return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        if ($user->role === 'hijo') {
+            return response()->json([
+                'message' => 'Los hijos no acceden a la app. Solo padres y madres gestionan la familia.',
+            ], 403);
         }
 
         if ($request->validated('device_id')) {

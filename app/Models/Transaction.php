@@ -21,6 +21,7 @@ class Transaction extends Model
     protected $fillable = [
         'family_id',
         'user_id',
+        'child_id',
         'amount',
         'currency',
         'type',
@@ -41,5 +42,10 @@ class Transaction extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function child(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'child_id');
     }
 }

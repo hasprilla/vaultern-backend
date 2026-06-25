@@ -42,7 +42,7 @@ class AuthApiTest extends TestCase
                  ->assertJsonValidationErrors(['role']);
     }
 
-    public function test_join_registers_second_parent_with_invite_code(): void
+    public function test_join_creates_pending_request_for_approver(): void
     {
         $parent = $this->postJson('/api/v1/auth/register', [
             'name'     => 'Padre Test',
@@ -51,6 +51,7 @@ class AuthApiTest extends TestCase
             'role'     => 'padre',
         ])->assertCreated();
 
+        $parentId = $parent->json('data.user.id');
         $familyId = $parent->json('data.user.family_id');
         $inviteCode = \App\Models\Family::query()->find($familyId)->invite_code;
 
@@ -59,10 +60,16 @@ class AuthApiTest extends TestCase
             'email'       => 'madre@zumifly.app',
             'password'    => 'SecurePass123!',
             'invite_code' => $inviteCode,
+            'invited_by'  => $parentId,
             'role'        => 'madre',
         ])
-            ->assertCreated()
-            ->assertJsonPath('data.user.role', 'madre');
+            ->assertStatus(202)
+            ->assertJsonPath('data.status', 'pending');
+
+        $this->assertDatabaseHas('family_join_requests', [
+            'email'  => 'madre@zumifly.app',
+            'status' => 'pending',
+        ]);
     }
 
     public function test_join_rejects_hijo_role(): void

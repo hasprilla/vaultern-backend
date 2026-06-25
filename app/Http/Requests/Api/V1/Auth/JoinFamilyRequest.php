@@ -21,6 +21,7 @@ class JoinFamilyRequest extends FormRequest
             'email'       => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
             'password'    => ['required', 'string', 'min:8'],
             'invite_code' => ['required', 'string', 'size:8'],
+            'invited_by'  => ['required', 'integer', 'exists:users,id'],
             'role'        => ['required', 'string', Rule::in(['padre', 'madre'])],
         ];
     }

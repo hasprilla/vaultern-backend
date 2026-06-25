@@ -20,9 +20,13 @@ class FinanceController extends Controller
             return response()->json(['message' => 'Forbidden'], 403);
         }
 
-        $transactions = Transaction::query()
-            ->orderByDesc('transaction_date')
-            ->paginate(20);
+        $query = Transaction::query()->with('child')->orderByDesc('transaction_date');
+
+        if ($request->filled('child_id')) {
+            $query->where('child_id', $request->integer('child_id'));
+        }
+
+        $transactions = $query->paginate(20);
 
         return response()->json($transactions);
     }
@@ -40,15 +44,26 @@ class FinanceController extends Controller
             'category'         => ['nullable', 'string', 'max:50'],
             'description'      => ['nullable', 'string', 'max:255'],
             'transaction_date' => ['required', 'date'],
+            'child_id'         => ['nullable', 'integer', 'exists:users,id'],
         ]);
+
+        if (isset($validated['child_id'])) {
+            $child = \App\Models\User::query()->findOrFail($validated['child_id']);
+            if ($child->family_id !== $request->user()->family_id || $child->role !== 'hijo') {
+                return response()->json(['message' => 'Hijo no válido para esta familia'], 422);
+            }
+        }
 
         $transaction = Transaction::query()->create([
             'id'               => (string) Str::uuid(),
             'family_id'        => $request->user()->family_id,
             'user_id'          => $request->user()->id,
+            'child_id'         => $validated['child_id'] ?? null,
             ...$validated,
             'currency'         => $validated['currency'] ?? 'COP',
         ]);
+
+        $transaction->load('child');
 
         return response()->json(['data' => $transaction], 201);
     }

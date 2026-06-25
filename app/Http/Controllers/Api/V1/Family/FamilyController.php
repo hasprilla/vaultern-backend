@@ -4,20 +4,24 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1\Family;
 
+use App\Application\Family\FamilyJoinRequestService;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\Family\CreateFamilyRequest;
 use App\Http\Requests\Api\V1\Family\InviteMemberRequest;
 use App\Http\Requests\Api\V1\Family\RegisterChildRequest;
 use App\Http\Resources\Api\V1\UserResource;
 use App\Models\Family;
+use App\Models\FamilyJoinRequest;
 use App\Models\FamilyMember;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
 class FamilyController extends Controller
 {
+    public function __construct(private readonly FamilyJoinRequestService $joinRequests) {}
     public function index(Request $request): JsonResponse
     {
         $family = Family::query()->findOrFail($request->user()->family_id);
@@ -136,8 +140,8 @@ class FamilyController extends Controller
 
         $child = User::query()->create([
             'name'      => $request->validated('name'),
-            'email'     => $request->validated('email'),
-            'password'  => $request->validated('password'),
+            'email'     => 'hijo.'.(string) Str::uuid().'@zumifly.internal',
+            'password'  => Hash::make(Str::random(32)),
             'role'      => 'hijo',
             'family_id' => $family,
         ]);
@@ -151,6 +155,58 @@ class FamilyController extends Controller
         ]);
 
         return response()->json(['data' => new UserResource($child)], 201);
+    }
+
+    public function joinRequests(Request $request, string $family): JsonResponse
+    {
+        $this->assertFamilyAccess($request, $family);
+
+        $requests = FamilyJoinRequest::query()
+            ->where('family_id', $family)
+            ->where('invited_by_user_id', $request->user()->id)
+            ->where('status', 'pending')
+            ->orderByDesc('created_at')
+            ->get();
+
+        return response()->json([
+            'data' => $requests->map(fn (FamilyJoinRequest $r) => [
+                'id'         => $r->id,
+                'name'       => $r->name,
+                'email'      => $r->email,
+                'role'       => $r->role,
+                'status'     => $r->status,
+                'created_at' => $r->created_at?->toIso8601String(),
+            ]),
+        ]);
+    }
+
+    public function approveJoinRequest(Request $request, string $family, string $joinRequest): JsonResponse
+    {
+        $this->assertFamilyAccess($request, $family);
+
+        $model = FamilyJoinRequest::query()
+            ->where('family_id', $family)
+            ->findOrFail($joinRequest);
+
+        $user = $this->joinRequests->approve($model, $request->user());
+
+        return response()->json([
+            'message' => 'Solicitud aprobada. La persona ya puede iniciar sesión.',
+            'data'    => new UserResource($user),
+        ]);
+    }
+
+    public function rejectJoinRequest(Request $request, string $family, string $joinRequest): JsonResponse
+    {
+        $this->assertFamilyAccess($request, $family);
+
+        $model = FamilyJoinRequest::query()
+            ->where('family_id', $family)
+            ->findOrFail($joinRequest);
+
+        $this->joinRequests->reject($model, $request->user());
+
+        return response()->json(['message' => 'Solicitud rechazada']);
     }
 
     public function assignRole(Request $request, string $family, string $member): JsonResponse
