@@ -181,21 +181,25 @@ class FamilyController extends Controller
     {
         $this->assertFamilyAccess($request, $family);
 
+        if (! $request->user()->familyRole()->canInviteMembers()) {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
         $requests = FamilyJoinRequest::query()
             ->where('family_id', $family)
-            ->where('invited_by_user_id', $request->user()->id)
             ->where('status', 'pending')
             ->orderByDesc('created_at')
             ->get();
 
         return response()->json([
             'data' => $requests->map(fn (FamilyJoinRequest $r) => [
-                'id'         => $r->id,
-                'name'       => $r->name,
-                'email'      => $r->email,
-                'role'       => $r->role,
-                'status'     => $r->status,
-                'created_at' => $r->created_at?->toIso8601String(),
+                'id'                 => $r->id,
+                'name'               => $r->name,
+                'email'              => $r->email,
+                'role'               => $r->role,
+                'status'             => $r->status,
+                'invited_by_user_id' => $r->invited_by_user_id,
+                'created_at'         => $r->created_at?->toIso8601String(),
             ]),
         ]);
     }

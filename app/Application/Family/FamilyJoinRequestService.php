@@ -29,6 +29,10 @@ class FamilyJoinRequestService
             throw ValidationException::withMessages(['invited_by' => 'Solo un padre o madre puede invitar.']);
         }
 
+        if (User::query()->where('email', $email)->exists()) {
+            throw ValidationException::withMessages(['email' => 'Este email ya está registrado.']);
+        }
+
         $pending = FamilyJoinRequest::query()
             ->where('family_id', $family->id)
             ->where('email', $email)
@@ -40,14 +44,14 @@ class FamilyJoinRequestService
         }
 
         return FamilyJoinRequest::query()->create([
-            'id'                  => (string) Str::uuid(),
-            'family_id'           => $family->id,
-            'invited_by_user_id'  => $inviter->id,
-            'name'                => $name,
-            'email'               => $email,
-            'password'            => $password,
-            'role'                => $role,
-            'status'              => 'pending',
+            'id' => (string) Str::uuid(),
+            'family_id' => $family->id,
+            'invited_by_user_id' => $inviter->id,
+            'name' => $name,
+            'email' => $email,
+            'password' => $password,
+            'role' => $role,
+            'status' => 'pending',
         ]);
     }
 
@@ -57,25 +61,33 @@ class FamilyJoinRequestService
             throw ValidationException::withMessages(['status' => 'La solicitud ya fue procesada.']);
         }
 
-        if ($approver->id !== $request->invited_by_user_id) {
-            abort(403, 'Solo quien compartió el código puede aprobar esta solicitud.');
+        if ($approver->family_id !== $request->family_id) {
+            abort(403, 'No perteneces a esta familia.');
+        }
+
+        if (! $approver->familyRole()->canInviteMembers()) {
+            abort(403, 'Solo un padre o madre puede aprobar solicitudes.');
+        }
+
+        if (User::query()->where('email', $request->email)->exists()) {
+            throw ValidationException::withMessages(['email' => 'Este email ya está registrado.']);
         }
 
         $user = User::query()->create([
-            'name'              => $request->name,
-            'email'             => $request->email,
-            'password'          => $request->password,
-            'role'              => $request->role,
-            'family_id'         => $request->family_id,
+            'name' => $request->name,
+            'email' => $request->email,
+            'password' => $request->password,
+            'role' => $request->role,
+            'family_id' => $request->family_id,
             'email_verified_at' => now(),
         ]);
 
         FamilyMember::query()->create([
-            'id'        => (string) Str::uuid(),
+            'id' => (string) Str::uuid(),
             'family_id' => $request->family_id,
-            'user_id'   => $user->id,
-            'role'      => $request->role,
-            'status'    => 'active',
+            'user_id' => $user->id,
+            'role' => $request->role,
+            'status' => 'active',
         ]);
 
         $request->update(['status' => 'approved']);
@@ -89,8 +101,12 @@ class FamilyJoinRequestService
             throw ValidationException::withMessages(['status' => 'La solicitud ya fue procesada.']);
         }
 
-        if ($approver->id !== $request->invited_by_user_id) {
-            abort(403, 'Solo quien compartió el código puede rechazar esta solicitud.');
+        if ($approver->family_id !== $request->family_id) {
+            abort(403, 'No perteneces a esta familia.');
+        }
+
+        if (! $approver->familyRole()->canInviteMembers()) {
+            abort(403, 'Solo un padre o madre puede rechazar solicitudes.');
         }
 
         $request->update(['status' => 'rejected']);

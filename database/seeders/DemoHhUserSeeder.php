@@ -24,7 +24,21 @@ class DemoHhUserSeeder extends Seeder
 
     public const PARTNER_EMAIL = 'pareja.hh@yopmail.com';
 
+    public const PENDING_PARTNER_EMAIL = 'invitado.pendiente@yopmail.com';
+
+    public const PENDING_TUTOR_EMAIL = 'carlos.invitado@yopmail.com';
+
     public const DEMO_PASSWORD = 'password';
+
+    /** @var list<string> */
+    private const DEMO_EMAILS = [
+        self::PARTNER_EMAIL,
+        self::PENDING_PARTNER_EMAIL,
+        self::PENDING_TUTOR_EMAIL,
+        'sofia.demo@zumifly.internal',
+        'lucas.demo@zumifly.internal',
+        'valentina.demo@zumifly.internal',
+    ];
 
     public function run(): void
     {
@@ -76,6 +90,15 @@ class DemoHhUserSeeder extends Seeder
             'email_verified_at' => now(),
         ]);
 
+        $valentina = User::query()->create([
+            'name' => 'Valentina Demo',
+            'email' => 'valentina.demo@zumifly.internal',
+            'password' => Hash::make(Str::random(32)),
+            'role' => 'hijo',
+            'family_id' => $family->id,
+            'email_verified_at' => now(),
+        ]);
+
         $harvey->update(['family_id' => $family->id]);
 
         foreach ([
@@ -83,6 +106,7 @@ class DemoHhUserSeeder extends Seeder
             [$maria, 'madre'],
             [$sofia, 'hijo'],
             [$lucas, 'hijo'],
+            [$valentina, 'hijo'],
         ] as [$user, $role]) {
             FamilyMember::query()->create([
                 'id' => (string) Str::uuid(),
@@ -94,21 +118,12 @@ class DemoHhUserSeeder extends Seeder
             ]);
         }
 
-        $tasks = $this->seedTasks($family, $harvey, $maria, $sofia, $lucas);
-        $transactions = $this->seedTransactions($family, $harvey, $maria, $sofia, $lucas);
+        $tasks = $this->seedTasks($family, $harvey, $maria, $sofia, $lucas, $valentina);
+        $transactions = $this->seedTransactions($family, $harvey, $maria, $sofia, $lucas, $valentina);
         $budgets = $this->seedBudgets($family);
-        $ocrJobs = $this->seedOcrJobs($family, $maria);
+        $ocrJobs = $this->seedOcrJobs($family, $maria, $harvey);
 
-        FamilyJoinRequest::query()->create([
-            'id' => (string) Str::uuid(),
-            'family_id' => $family->id,
-            'invited_by_user_id' => $harvey->id,
-            'name' => 'Carlos Invitado',
-            'email' => 'carlos.invitado@yopmail.com',
-            'password' => Hash::make(self::DEMO_PASSWORD),
-            'role' => 'tutor',
-            'status' => 'pending',
-        ]);
+        $this->seedJoinRequests($family, $harvey, $maria);
 
         Device::query()->create([
             'id' => (string) Str::uuid(),
@@ -123,6 +138,32 @@ class DemoHhUserSeeder extends Seeder
 
         $this->command?->info('Demo listo para '.self::PRIMARY_EMAIL.' (clave: '.self::DEMO_PASSWORD.')');
         $this->command?->info("Familia: {$family->name} · Código: {$family->invite_code}");
+        $this->command?->info('Solicitudes pendientes: '.self::PENDING_PARTNER_EMAIL.' y '.self::PENDING_TUTOR_EMAIL.' (clave: '.self::DEMO_PASSWORD.')');
+    }
+
+    private function seedJoinRequests(Family $family, User $harvey, User $maria): void
+    {
+        FamilyJoinRequest::query()->create([
+            'id' => (string) Str::uuid(),
+            'family_id' => $family->id,
+            'invited_by_user_id' => $harvey->id,
+            'name' => 'Ana Pendiente',
+            'email' => self::PENDING_PARTNER_EMAIL,
+            'password' => self::DEMO_PASSWORD,
+            'role' => 'madre',
+            'status' => 'pending',
+        ]);
+
+        FamilyJoinRequest::query()->create([
+            'id' => (string) Str::uuid(),
+            'family_id' => $family->id,
+            'invited_by_user_id' => $maria->id,
+            'name' => 'Carlos Tutor',
+            'email' => self::PENDING_TUTOR_EMAIL,
+            'password' => self::DEMO_PASSWORD,
+            'role' => 'tutor',
+            'status' => 'pending',
+        ]);
     }
 
     private function resetDemoFamily(): void
@@ -130,7 +171,7 @@ class DemoHhUserSeeder extends Seeder
         $primary = User::query()->where('email', self::PRIMARY_EMAIL)->first();
 
         if ($primary?->family_id === null) {
-            User::query()->where('email', self::PARTNER_EMAIL)->delete();
+            User::query()->whereIn('email', self::DEMO_EMAILS)->delete();
 
             return;
         }
@@ -153,6 +194,8 @@ class DemoHhUserSeeder extends Seeder
             ->where('email', '!=', self::PRIMARY_EMAIL)
             ->delete();
 
+        User::query()->whereIn('email', self::DEMO_EMAILS)->delete();
+
         $primary->update(['family_id' => null]);
         Family::query()->where('id', $familyId)->delete();
     }
@@ -160,7 +203,7 @@ class DemoHhUserSeeder extends Seeder
     /**
      * @return array<string, Task>
      */
-    private function seedTasks(Family $family, User $harvey, User $maria, User $sofia, User $lucas): array
+    private function seedTasks(Family $family, User $harvey, User $maria, User $sofia, User $lucas, User $valentina): array
     {
         $definitions = [
             'math' => [
@@ -246,6 +289,29 @@ class DemoHhUserSeeder extends Seeder
             ]);
         }
 
+        $children = [$sofia, $lucas, $valentina];
+        $statuses = ['pending', 'in_progress', 'done', 'overdue'];
+        $priorities = ['baja', 'media', 'alta', 'urgente'];
+        $subjects = ['Matemáticas', 'Español', 'Ciencias', 'Inglés', 'Arte', 'Historia'];
+
+        for ($i = 1; $i <= 18; $i++) {
+            $status = $statuses[$i % count($statuses)];
+            $tasks["extra_$i"] = Task::query()->create([
+                'id' => (string) Str::uuid(),
+                'family_id' => $family->id,
+                'created_by' => $i % 2 === 0 ? $harvey->id : $maria->id,
+                'assigned_to' => $children[$i % count($children)]->id,
+                'title' => "Tarea demo #$i",
+                'description' => 'Generada para pruebas de paginación y listados.',
+                'status' => $status,
+                'priority' => $priorities[$i % count($priorities)],
+                'is_school' => $i % 3 !== 0,
+                'subject' => $subjects[$i % count($subjects)],
+                'due_date' => now()->addDays($i - 9)->toDateString(),
+                'completed_at' => $status === 'done' ? now()->subDays($i % 5) : null,
+            ]);
+        }
+
         return $tasks;
     }
 
@@ -258,6 +324,7 @@ class DemoHhUserSeeder extends Seeder
         User $maria,
         User $sofia,
         User $lucas,
+        User $valentina,
     ): array {
         $rows = [
             ['key' => 'salary', 'amount' => 5200000, 'type' => 'income', 'category' => 'Salario', 'description' => 'Nómina mensual', 'days_ago' => 5, 'user' => $harvey, 'child' => null],
@@ -270,6 +337,10 @@ class DemoHhUserSeeder extends Seeder
             ['key' => 'health', 'amount' => 180000, 'type' => 'expense', 'category' => 'Salud', 'description' => 'Medicamentos', 'days_ago' => 7, 'user' => $maria, 'child' => null],
             ['key' => 'entertainment', 'amount' => 95000, 'type' => 'expense', 'category' => 'Ocio', 'description' => 'Cine familiar', 'days_ago' => 4, 'user' => $harvey, 'child' => null],
             ['key' => 'freelance', 'amount' => 750000, 'type' => 'income', 'category' => 'Freelance', 'description' => 'Proyecto extra', 'days_ago' => 15, 'user' => $harvey, 'child' => null],
+            ['key' => 'allowance_valentina', 'amount' => 45000, 'type' => 'expense', 'category' => 'Mesada', 'description' => 'Mesada Valentina', 'days_ago' => 2, 'user' => $maria, 'child' => $valentina],
+            ['key' => 'school_lucas', 'amount' => 420000, 'type' => 'expense', 'category' => 'Educación', 'description' => 'Mensualidad Lucas', 'days_ago' => 11, 'user' => $harvey, 'child' => $lucas],
+            ['key' => 'utilities', 'amount' => 310000, 'type' => 'expense', 'category' => 'Servicios', 'description' => 'Agua y luz', 'days_ago' => 6, 'user' => $maria, 'child' => null],
+            ['key' => 'bonus', 'amount' => 900000, 'type' => 'income', 'category' => 'Bono', 'description' => 'Bono trimestral', 'days_ago' => 20, 'user' => $maria, 'child' => null],
         ];
 
         $transactions = [];
@@ -289,6 +360,24 @@ class DemoHhUserSeeder extends Seeder
                 'category' => $row['category'],
                 'description' => $row['description'],
                 'transaction_date' => now()->subDays($row['days_ago'])->toDateString(),
+            ]);
+        }
+
+        $categories = ['Mercado', 'Transporte', 'Educación', 'Ocio', 'Salud', 'Hogar'];
+        $children = [$sofia, $lucas, $valentina];
+        for ($i = 1; $i <= 20; $i++) {
+            $isIncome = $i % 5 === 0;
+            $transactions["generated_$i"] = Transaction::query()->create([
+                'id' => (string) Str::uuid(),
+                'family_id' => $family->id,
+                'user_id' => $i % 2 === 0 ? $harvey->id : $maria->id,
+                'child_id' => $i % 4 === 0 ? $children[$i % 3]->id : null,
+                'amount' => ($isIncome ? 250000 : 85000) + ($i * 3500),
+                'currency' => 'COP',
+                'type' => $isIncome ? 'income' : 'expense',
+                'category' => $categories[$i % count($categories)],
+                'description' => ($isIncome ? 'Ingreso' : 'Gasto')." demo #$i",
+                'transaction_date' => now()->subDays($i)->toDateString(),
             ]);
         }
 
@@ -334,13 +423,33 @@ class DemoHhUserSeeder extends Seeder
                 'start_date' => $start->toDateString(),
                 'end_date' => $end->toDateString(),
             ]),
+            'health' => Budget::query()->create([
+                'id' => (string) Str::uuid(),
+                'family_id' => $family->id,
+                'name' => 'Salud',
+                'amount' => 600000,
+                'currency' => 'COP',
+                'period' => 'monthly',
+                'start_date' => $start->toDateString(),
+                'end_date' => $end->toDateString(),
+            ]),
+            'transport' => Budget::query()->create([
+                'id' => (string) Str::uuid(),
+                'family_id' => $family->id,
+                'name' => 'Transporte',
+                'amount' => 350000,
+                'currency' => 'COP',
+                'period' => 'monthly',
+                'start_date' => $start->toDateString(),
+                'end_date' => $end->toDateString(),
+            ]),
         ];
     }
 
     /**
      * @return array<string, OcrJob>
      */
-    private function seedOcrJobs(Family $family, User $maria): array
+    private function seedOcrJobs(Family $family, User $maria, User $harvey): array
     {
         return [
             'invoice' => OcrJob::query()->create([
@@ -377,6 +486,23 @@ class DemoHhUserSeeder extends Seeder
                 ],
                 'confidence' => 0.88,
             ]),
+            'receipt' => OcrJob::query()->create([
+                'id' => (string) Str::uuid(),
+                'family_id' => $family->id,
+                'user_id' => $harvey->id,
+                'type' => 'invoice',
+                'status' => 'done',
+                'file_path' => 'ocr/demo/recibo-colegio.jpg',
+                'mime_type' => 'image/jpeg',
+                'raw_text' => ['text' => 'Recibo de colegio digitalizado.'],
+                'structured_data' => [
+                    'vendor' => 'Colegio Demo',
+                    'total' => 450000,
+                    'currency' => 'COP',
+                    'invoice_date' => now()->subDays(10)->toDateString(),
+                ],
+                'confidence' => 0.9,
+            ]),
         ];
     }
 
@@ -396,11 +522,6 @@ class DemoHhUserSeeder extends Seeder
         array $budgets,
         array $ocrJobs,
     ): void {
-        $actorPayload = fn (User $actor): array => [
-            'actor_id' => $actor->id,
-            'actor_name' => $actor->name,
-        ];
-
         $definitions = [
             [
                 'type' => 'task_created',
@@ -477,8 +598,8 @@ class DemoHhUserSeeder extends Seeder
             [
                 'type' => 'family_invite',
                 'title' => 'Invitación enviada',
-                'body' => "{$maria->name} invitó a carlos.invitado@yopmail.com como tutor",
-                'data' => ['email' => 'carlos.invitado@yopmail.com'],
+                'body' => "{$maria->name} invitó a ".self::PENDING_TUTOR_EMAIL.' como tutor',
+                'data' => ['email' => self::PENDING_TUTOR_EMAIL],
                 'read' => false,
                 'days' => 1,
             ],
@@ -530,22 +651,58 @@ class DemoHhUserSeeder extends Seeder
         ];
 
         foreach ($definitions as $definition) {
-            $createdAt = now()->subDays($definition['days']);
-            $read = $definition['read'];
-
-            AppNotification::query()->create([
-                'id' => (string) Str::uuid(),
-                'family_id' => $family->id,
-                'user_id' => $harvey->id,
-                'type' => $definition['type'],
-                'title' => $definition['title'],
-                'body' => $definition['body'],
-                'data' => array_merge($definition['data'], $actorPayload($maria)),
-                'read' => $read,
-                'read_at' => $read ? $createdAt->copy()->addHours(2) : null,
-                'created_at' => $createdAt,
-                'updated_at' => $createdAt,
-            ]);
+            $this->createNotification(
+                $family,
+                $harvey,
+                $maria,
+                $definition,
+            );
         }
+
+        foreach (array_slice($definitions, 0, 8) as $definition) {
+            $this->createNotification($family, $maria, $harvey, $definition);
+        }
+
+        $this->createNotification($family, $harvey, $harvey, [
+            'type' => 'family_invite',
+            'title' => 'Solicitud de unión pendiente',
+            'body' => 'Ana Pendiente ('.self::PENDING_PARTNER_EMAIL.') espera tu aprobación',
+            'data' => ['email' => self::PENDING_PARTNER_EMAIL],
+            'read' => false,
+            'days' => 0,
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $definition
+     */
+    private function createNotification(
+        Family $family,
+        User $recipient,
+        User $actor,
+        array $definition,
+    ): void {
+        $createdAt = now()->subDays((int) ($definition['days'] ?? 0));
+        $read = (bool) ($definition['read'] ?? false);
+
+        AppNotification::query()->create([
+            'id' => (string) Str::uuid(),
+            'family_id' => $family->id,
+            'user_id' => $recipient->id,
+            'type' => $definition['type'],
+            'title' => $definition['title'],
+            'body' => $definition['body'],
+            'data' => array_merge(
+                $definition['data'] ?? [],
+                [
+                    'actor_id' => $actor->id,
+                    'actor_name' => $actor->name,
+                ],
+            ),
+            'read' => $read,
+            'read_at' => $read ? $createdAt->copy()->addHours(2) : null,
+            'created_at' => $createdAt,
+            'updated_at' => $createdAt,
+        ]);
     }
 }

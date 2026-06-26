@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Api\V1\Finance;
 
 use App\Domains\Finance\Entities\FinanceReportPeriod;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Concerns\ResolvesPagination;
 use App\Models\Budget;
 use App\Models\Transaction;
 use App\Services\FamilyNotificationService;
@@ -15,6 +16,8 @@ use Illuminate\Support\Str;
 
 class FinanceController extends Controller
 {
+    use ResolvesPagination;
+
     public function __construct(private readonly FamilyNotificationService $notifications) {}
 
     public function index(Request $request): JsonResponse
@@ -29,7 +32,7 @@ class FinanceController extends Controller
             $query->where('child_id', $request->integer('child_id'));
         }
 
-        $transactions = $query->paginate(20);
+        $transactions = $query->paginate($this->perPage($request));
 
         return response()->json($transactions);
     }

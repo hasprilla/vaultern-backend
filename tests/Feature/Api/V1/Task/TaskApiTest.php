@@ -42,4 +42,34 @@ class TaskApiTest extends TestCase
             ->assertOk()
             ->assertJsonStructure(['data']);
     }
+
+    public function test_authenticated_user_can_view_task_detail(): void
+    {
+        ['tokens' => $tokens] = $this->createUserWithFamily();
+
+        $create = $this->postJson('/api/v1/tasks', [
+            'title'     => 'Tarea detalle',
+            'priority'  => 'alta',
+            'is_school' => true,
+            'subject'   => 'Matemáticas',
+        ], $this->authHeaders($tokens))->assertCreated();
+
+        $taskId = $create->json('data.id');
+
+        $this->getJson("/api/v1/tasks/{$taskId}", $this->authHeaders($tokens))
+            ->assertOk()
+            ->assertJsonPath('data.id', $taskId)
+            ->assertJsonPath('data.title', 'Tarea detalle')
+            ->assertJsonStructure([
+                'data' => [
+                    'id',
+                    'title',
+                    'status',
+                    'priority',
+                    'is_school',
+                    'creator',
+                    'assignee',
+                ],
+            ]);
+    }
 }

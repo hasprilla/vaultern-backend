@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1\Notification;
 
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Concerns\ResolvesPagination;
 use App\Models\AppNotification;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
@@ -13,14 +14,24 @@ use Illuminate\Support\Str;
 
 class NotificationController extends Controller
 {
+    use ResolvesPagination;
+
     public function index(Request $request): JsonResponse
     {
+        $perPage = $this->perPage($request, 30);
+
         $notifications = AppNotification::query()
             ->where('user_id', $request->user()->id)
             ->orderByDesc('created_at')
-            ->paginate(30);
+            ->paginate($perPage);
 
-        return response()->json($notifications);
+        $payload = $notifications->toArray();
+        $payload['unread_count'] = AppNotification::query()
+            ->where('user_id', $request->user()->id)
+            ->where('read', false)
+            ->count();
+
+        return response()->json($payload);
     }
 
     public function markRead(Request $request, string $notification): JsonResponse

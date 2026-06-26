@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1\Task;
 
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Concerns\ResolvesPagination;
 use App\Models\Task;
 use App\Services\FamilyNotificationService;
 use Illuminate\Http\JsonResponse;
@@ -13,6 +14,8 @@ use Illuminate\Support\Str;
 
 class TaskController extends Controller
 {
+    use ResolvesPagination;
+
     public function __construct(private readonly FamilyNotificationService $notifications) {}
 
     public function index(Request $request): JsonResponse
@@ -27,7 +30,7 @@ class TaskController extends Controller
             $query->where('status', $request->input('status'));
         }
 
-        $tasks = $query->orderByDesc('created_at')->paginate(20);
+        $tasks = $query->orderByDesc('created_at')->paginate($this->perPage($request));
 
         return response()->json($tasks);
     }
@@ -154,7 +157,7 @@ class TaskController extends Controller
             'completed_at' => now(),
         ]);
 
-        $model = $model->fresh();
+        $model = $model->fresh(['creator', 'assignee']);
 
         $this->notifications->notifyPartnerParents(
             $request->user(),
