@@ -99,7 +99,7 @@ class SupportController extends Controller
             return response()->json(['message' => 'Forbidden'], 403);
         }
 
-        if (in_array($ticket->status, ['resolved', 'closed'], true) && ! $request->user()->canManageSupportTickets()) {
+        if ($ticket->status === 'closed' && ! $request->user()->canManageSupportTickets()) {
             return response()->json(['message' => 'Este ticket está cerrado.'], 422);
         }
 
@@ -125,6 +125,10 @@ class SupportController extends Controller
         }
 
         if (! $isStaff && $ticket->status === 'waiting_user') {
+            $updates['status'] = 'in_progress';
+        }
+
+        if (! $isStaff && $ticket->status === 'resolved') {
             $updates['status'] = 'in_progress';
         }
 
