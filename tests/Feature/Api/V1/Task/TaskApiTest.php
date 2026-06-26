@@ -72,4 +72,34 @@ class TaskApiTest extends TestCase
                 ],
             ]);
     }
+
+    public function test_authenticated_user_can_filter_overdue_tasks(): void
+    {
+        ['tokens' => $tokens] = $this->createUserWithFamily();
+
+        $this->postJson('/api/v1/tasks', [
+            'title'    => 'Tarea vencida por fecha',
+            'due_date' => now()->subDay()->toDateString(),
+        ], $this->authHeaders($tokens))->assertCreated();
+
+        $create = $this->postJson('/api/v1/tasks', [
+            'title' => 'Tarea con estado overdue',
+        ], $this->authHeaders($tokens))->assertCreated();
+
+        $this->patchJson(
+            '/api/v1/tasks/'.$create->json('data.id'),
+            ['status' => 'overdue'],
+            $this->authHeaders($tokens),
+        )->assertOk();
+
+        $this->postJson('/api/v1/tasks', [
+            'title'    => 'Tarea al día',
+            'due_date' => now()->addDay()->toDateString(),
+        ], $this->authHeaders($tokens))->assertCreated();
+
+        $response = $this->getJson('/api/v1/tasks?status=overdue', $this->authHeaders($tokens))
+            ->assertOk();
+
+        $this->assertGreaterThanOrEqual(2, count($response->json('data')));
+    }
 }

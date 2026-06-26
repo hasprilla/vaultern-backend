@@ -28,8 +28,13 @@ class DashboardController extends Controller
         $tasksDone  = Task::query()->where('status', 'done')->where('completed_at', '>=', $from)->count();
         $tasksOverdue = Task::query()
             ->where('status', '!=', 'done')
-            ->whereNotNull('due_date')
-            ->where('due_date', '<', now())
+            ->where(function ($builder) {
+                $builder->where('status', 'overdue')
+                    ->orWhere(function ($nested) {
+                        $nested->whereNotNull('due_date')
+                            ->whereDate('due_date', '<', now());
+                    });
+            })
             ->count();
 
         $expenses = 0.0;

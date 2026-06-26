@@ -27,10 +27,27 @@ class TaskController extends Controller
         }
 
         if ($request->filled('status')) {
-            $query->where('status', $request->input('status'));
+            $status = $request->input('status');
+
+            if ($status === 'overdue') {
+                $query->where('status', '!=', 'done')
+                    ->where(function ($builder) {
+                        $builder->where('status', 'overdue')
+                            ->orWhere(function ($nested) {
+                                $nested->whereNotNull('due_date')
+                                    ->whereDate('due_date', '<', now());
+                            });
+                    });
+            } else {
+                $query->where('status', $status);
+            }
         }
 
-        $tasks = $query->orderByDesc('created_at')->paginate($this->perPage($request));
+        if ($request->input('status') === 'overdue') {
+            $tasks = $query->orderBy('due_date')->paginate($this->perPage($request));
+        } else {
+            $tasks = $query->orderByDesc('created_at')->paginate($this->perPage($request));
+        }
 
         return response()->json($tasks);
     }
