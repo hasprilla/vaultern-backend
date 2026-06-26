@@ -15,11 +15,17 @@ use App\Models\Task;
 use App\Models\Transaction;
 use App\Models\User;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
 class DemoHhUserSeeder extends Seeder
 {
+    private const BULK_TASK_COUNT = 476;
+
+    private const BULK_TRANSACTION_COUNT = 366;
+
+    private const BULK_NOTIFICATION_COUNT = 67;
     public const PRIMARY_EMAIL = 'hh@yopmail.com';
 
     public const PARTNER_EMAIL = 'pareja.hh@yopmail.com';
@@ -139,6 +145,15 @@ class DemoHhUserSeeder extends Seeder
         $this->command?->info('Demo listo para '.self::PRIMARY_EMAIL.' (clave: '.self::DEMO_PASSWORD.')');
         $this->command?->info("Familia: {$family->name} · Código: {$family->invite_code}");
         $this->command?->info('Solicitudes pendientes: '.self::PENDING_PARTNER_EMAIL.' y '.self::PENDING_TUTOR_EMAIL.' (clave: '.self::DEMO_PASSWORD.')');
+        $this->command?->info(sprintf(
+            'Datos generados: %d tareas, %d transacciones, %d notificaciones (aprox. %d registros).',
+            Task::query()->where('family_id', $family->id)->count(),
+            Transaction::query()->where('family_id', $family->id)->count(),
+            AppNotification::query()->where('family_id', $family->id)->count(),
+            Task::query()->where('family_id', $family->id)->count()
+                + Transaction::query()->where('family_id', $family->id)->count()
+                + AppNotification::query()->where('family_id', $family->id)->count(),
+        ));
     }
 
     private function seedJoinRequests(Family $family, User $harvey, User $maria): void
@@ -312,7 +327,57 @@ class DemoHhUserSeeder extends Seeder
             ]);
         }
 
+        $this->bulkInsertTasks($family, $harvey, $maria, $children, self::BULK_TASK_COUNT);
+
         return $tasks;
+    }
+
+    /**
+     * @param  list<User>  $children
+     */
+    private function bulkInsertTasks(
+        Family $family,
+        User $harvey,
+        User $maria,
+        array $children,
+        int $count,
+    ): void {
+        $statuses = ['pending', 'in_progress', 'done', 'overdue'];
+        $priorities = ['baja', 'media', 'alta', 'urgente'];
+        $subjects = ['Matemáticas', 'Español', 'Ciencias', 'Inglés', 'Arte', 'Historia', 'Educación física'];
+        $parents = [$harvey, $maria];
+        $now = now();
+        $rows = [];
+
+        for ($i = 1; $i <= $count; $i++) {
+            $status = $statuses[$i % count($statuses)];
+            $createdAt = $now->copy()->subDays($i % 120)->subHours($i % 24);
+            $rows[] = [
+                'id' => (string) Str::uuid(),
+                'family_id' => $family->id,
+                'created_by' => $parents[$i % 2]->id,
+                'assigned_to' => $children[$i % count($children)]->id,
+                'title' => "Tarea volumen #$i",
+                'description' => 'Registro masivo para pruebas de paginación y rendimiento.',
+                'status' => $status,
+                'priority' => $priorities[$i % count($priorities)],
+                'is_school' => $i % 3 !== 0,
+                'subject' => $i % 3 !== 0 ? $subjects[$i % count($subjects)] : null,
+                'due_date' => $now->copy()->addDays(($i % 30) - 15)->toDateString(),
+                'completed_at' => $status === 'done' ? $createdAt->copy()->addHours(4) : null,
+                'created_at' => $createdAt,
+                'updated_at' => $createdAt,
+            ];
+
+            if (count($rows) >= 100) {
+                DB::table('tasks')->insert($rows);
+                $rows = [];
+            }
+        }
+
+        if ($rows !== []) {
+            DB::table('tasks')->insert($rows);
+        }
     }
 
     /**
@@ -381,7 +446,53 @@ class DemoHhUserSeeder extends Seeder
             ]);
         }
 
+        $this->bulkInsertTransactions($family, $harvey, $maria, $children, self::BULK_TRANSACTION_COUNT);
+
         return $transactions;
+    }
+
+    /**
+     * @param  list<User>  $children
+     */
+    private function bulkInsertTransactions(
+        Family $family,
+        User $harvey,
+        User $maria,
+        array $children,
+        int $count,
+    ): void {
+        $categories = ['Mercado', 'Transporte', 'Educación', 'Ocio', 'Salud', 'Hogar', 'Servicios', 'Mesada'];
+        $parents = [$harvey, $maria];
+        $now = now();
+        $rows = [];
+
+        for ($i = 1; $i <= $count; $i++) {
+            $isIncome = $i % 6 === 0;
+            $createdAt = $now->copy()->subDays($i % 180);
+            $rows[] = [
+                'id' => (string) Str::uuid(),
+                'family_id' => $family->id,
+                'user_id' => $parents[$i % 2]->id,
+                'child_id' => $i % 5 === 0 ? $children[$i % count($children)]->id : null,
+                'amount' => ($isIncome ? 180000 : 65000) + ($i * 1250),
+                'currency' => 'COP',
+                'type' => $isIncome ? 'income' : 'expense',
+                'category' => $categories[$i % count($categories)],
+                'description' => ($isIncome ? 'Ingreso' : 'Gasto')." volumen #$i",
+                'transaction_date' => $createdAt->toDateString(),
+                'created_at' => $createdAt,
+                'updated_at' => $createdAt,
+            ];
+
+            if (count($rows) >= 100) {
+                DB::table('transactions')->insert($rows);
+                $rows = [];
+            }
+        }
+
+        if ($rows !== []) {
+            DB::table('transactions')->insert($rows);
+        }
     }
 
     /**
@@ -671,6 +782,50 @@ class DemoHhUserSeeder extends Seeder
             'read' => false,
             'days' => 0,
         ]);
+
+        $this->bulkInsertNotifications($family, $harvey, $maria, self::BULK_NOTIFICATION_COUNT);
+    }
+
+    private function bulkInsertNotifications(Family $family, User $harvey, User $maria, int $count): void
+    {
+        $types = ['task_created', 'task_completed', 'finance_transaction', 'family_invite', 'ocr_scan', 'alert_read'];
+        $recipients = [$harvey, $maria];
+        $actors = [$maria, $harvey];
+        $now = now();
+        $rows = [];
+
+        for ($i = 1; $i <= $count; $i++) {
+            $createdAt = $now->copy()->subDays($i % 90)->subHours($i % 12);
+            $read = $i % 3 === 0;
+            $actor = $actors[$i % 2];
+            $rows[] = [
+                'id' => (string) Str::uuid(),
+                'family_id' => $family->id,
+                'user_id' => $recipients[$i % 2]->id,
+                'type' => $types[$i % count($types)],
+                'title' => "Notificación demo #$i",
+                'body' => "{$actor->name} generó actividad de prueba #$i en la familia.",
+                'data' => json_encode([
+                    'actor_id' => $actor->id,
+                    'actor_name' => $actor->name,
+                    'entity_type' => 'demo',
+                    'entity_id' => (string) Str::uuid(),
+                ], JSON_THROW_ON_ERROR),
+                'read' => $read,
+                'read_at' => $read ? $createdAt->copy()->addHour() : null,
+                'created_at' => $createdAt,
+                'updated_at' => $createdAt,
+            ];
+
+            if (count($rows) >= 100) {
+                DB::table('notifications')->insert($rows);
+                $rows = [];
+            }
+        }
+
+        if ($rows !== []) {
+            DB::table('notifications')->insert($rows);
+        }
     }
 
     /**
