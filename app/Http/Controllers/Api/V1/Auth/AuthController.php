@@ -179,6 +179,17 @@ class AuthController extends Controller
             ], 403);
         }
 
+        if ($user->account_status === 'deactivated') {
+            return response()->json([
+                'message' => 'Tu cuenta está desactivada temporalmente. Puedes reactivarla desde el inicio de sesión.',
+                'code'    => 'account_deactivated',
+            ], 403);
+        }
+
+        if ($user->trashed() || $user->account_status === 'deleted') {
+            return response()->json(['message' => 'Esta cuenta fue eliminada.'], 403);
+        }
+
         if ($request->validated('device_id')) {
             $this->devices->register(
                 $user,

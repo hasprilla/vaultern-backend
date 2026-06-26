@@ -22,6 +22,17 @@ class ApiAuthenticate
             return response()->json(['message' => 'Unauthenticated.'], 401);
         }
 
+        if ($user->trashed() || $user->account_status === 'deleted') {
+            return response()->json(['message' => 'Esta cuenta fue eliminada.'], 403);
+        }
+
+        if ($user->account_status === 'deactivated') {
+            return response()->json([
+                'message' => 'Tu cuenta está desactivada temporalmente.',
+                'code'    => 'account_deactivated',
+            ], 403);
+        }
+
         Auth::setUser($user);
 
         return $next($request);

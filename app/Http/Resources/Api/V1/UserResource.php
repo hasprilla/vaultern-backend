@@ -21,6 +21,9 @@ class UserResource extends JsonResource
             'avatar'          => $this->avatar,
             'mfa_enabled'     => (bool) $this->mfa_enabled,
             'email_verified'  => $this->email_verified_at !== null,
+            'account_status'  => $this->account_status ?? 'active',
+            'deactivated_at'  => $this->deactivated_at?->toIso8601String(),
+            'notification_preferences' => $this->resolvedNotificationPreferences(),
             'created_at'      => $this->created_at?->toIso8601String(),
         ];
     }

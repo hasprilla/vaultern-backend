@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Domains\Family\Entities\FamilyRole;
+use App\Support\NotificationPreferences;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
@@ -15,6 +17,7 @@ class User extends Authenticatable
 {
     use HasFactory;
     use Notifiable;
+    use SoftDeletes;
 
     protected $fillable = [
         'name',
@@ -26,6 +29,9 @@ class User extends Authenticatable
         'mfa_enabled',
         'mfa_secret',
         'device_fingerprint',
+        'account_status',
+        'deactivated_at',
+        'notification_preferences',
     ];
 
     protected $hidden = [
@@ -37,11 +43,24 @@ class User extends Authenticatable
     protected function casts(): array
     {
         return [
-            'email_verified_at' => 'datetime',
-            'password'          => 'hashed',
-            'mfa_enabled'       => 'boolean',
-            'mfa_secret'        => 'encrypted',
+            'email_verified_at'        => 'datetime',
+            'deactivated_at'           => 'datetime',
+            'password'                 => 'hashed',
+            'mfa_enabled'              => 'boolean',
+            'mfa_secret'               => 'encrypted',
+            'notification_preferences' => 'array',
         ];
+    }
+
+    /** @return array<string, bool> */
+    public function resolvedNotificationPreferences(): array
+    {
+        return NotificationPreferences::merge($this->notification_preferences);
+    }
+
+    public function isActive(): bool
+    {
+        return $this->account_status === 'active' && ! $this->trashed();
     }
 
     public function family(): BelongsTo
