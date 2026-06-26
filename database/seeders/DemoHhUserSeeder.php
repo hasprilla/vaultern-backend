@@ -11,6 +11,8 @@ use App\Models\Family;
 use App\Models\FamilyJoinRequest;
 use App\Models\FamilyMember;
 use App\Models\OcrJob;
+use App\Models\SupportTicket;
+use App\Models\SupportTicketMessage;
 use App\Models\Task;
 use App\Models\Transaction;
 use App\Models\User;
@@ -21,11 +23,12 @@ use Illuminate\Support\Str;
 
 class DemoHhUserSeeder extends Seeder
 {
-    private const BULK_TASK_COUNT = 476;
+    /** Registros masivos (inserción por lotes). Total objetivo: 5000. */
+    private const BULK_TASK_COUNT = 2000;
 
-    private const BULK_TRANSACTION_COUNT = 366;
+    private const BULK_TRANSACTION_COUNT = 2000;
 
-    private const BULK_NOTIFICATION_COUNT = 67;
+    private const BULK_NOTIFICATION_COUNT = 1000;
     public const PRIMARY_EMAIL = 'hh@yopmail.com';
 
     public const PARTNER_EMAIL = 'pareja.hh@yopmail.com';
@@ -69,41 +72,49 @@ class DemoHhUserSeeder extends Seeder
             'settings' => ['locale' => 'es', 'currency' => 'COP'],
         ]);
 
-        $maria = User::query()->create([
-            'name' => 'María Demo',
-            'email' => self::PARTNER_EMAIL,
-            'password' => Hash::make(self::DEMO_PASSWORD),
-            'role' => 'madre',
-            'family_id' => $family->id,
-            'email_verified_at' => now(),
-        ]);
+        $maria = User::query()->updateOrCreate(
+            ['email' => self::PARTNER_EMAIL],
+            [
+                'name' => 'María Demo',
+                'password' => Hash::make(self::DEMO_PASSWORD),
+                'role' => 'madre',
+                'family_id' => $family->id,
+                'email_verified_at' => now(),
+            ],
+        );
 
-        $sofia = User::query()->create([
-            'name' => 'Sofía Demo',
-            'email' => 'sofia.demo@zumifly.internal',
-            'password' => Hash::make(Str::random(32)),
-            'role' => 'hijo',
-            'family_id' => $family->id,
-            'email_verified_at' => now(),
-        ]);
+        $sofia = User::query()->updateOrCreate(
+            ['email' => 'sofia.demo@zumifly.internal'],
+            [
+                'name' => 'Sofía Demo',
+                'password' => Hash::make(Str::random(32)),
+                'role' => 'hijo',
+                'family_id' => $family->id,
+                'email_verified_at' => now(),
+            ],
+        );
 
-        $lucas = User::query()->create([
-            'name' => 'Lucas Demo',
-            'email' => 'lucas.demo@zumifly.internal',
-            'password' => Hash::make(Str::random(32)),
-            'role' => 'hijo',
-            'family_id' => $family->id,
-            'email_verified_at' => now(),
-        ]);
+        $lucas = User::query()->updateOrCreate(
+            ['email' => 'lucas.demo@zumifly.internal'],
+            [
+                'name' => 'Lucas Demo',
+                'password' => Hash::make(Str::random(32)),
+                'role' => 'hijo',
+                'family_id' => $family->id,
+                'email_verified_at' => now(),
+            ],
+        );
 
-        $valentina = User::query()->create([
-            'name' => 'Valentina Demo',
-            'email' => 'valentina.demo@zumifly.internal',
-            'password' => Hash::make(Str::random(32)),
-            'role' => 'hijo',
-            'family_id' => $family->id,
-            'email_verified_at' => now(),
-        ]);
+        $valentina = User::query()->updateOrCreate(
+            ['email' => 'valentina.demo@zumifly.internal'],
+            [
+                'name' => 'Valentina Demo',
+                'password' => Hash::make(Str::random(32)),
+                'role' => 'hijo',
+                'family_id' => $family->id,
+                'email_verified_at' => now(),
+            ],
+        );
 
         $harvey->update(['family_id' => $family->id]);
 
@@ -146,13 +157,11 @@ class DemoHhUserSeeder extends Seeder
         $this->command?->info("Familia: {$family->name} · Código: {$family->invite_code}");
         $this->command?->info('Solicitudes pendientes: '.self::PENDING_PARTNER_EMAIL.' y '.self::PENDING_TUTOR_EMAIL.' (clave: '.self::DEMO_PASSWORD.')');
         $this->command?->info(sprintf(
-            'Datos generados: %d tareas, %d transacciones, %d notificaciones (aprox. %d registros).',
+            'Datos generados: %d tareas, %d transacciones, %d notificaciones (%d registros masivos + datos demo).',
             Task::query()->where('family_id', $family->id)->count(),
             Transaction::query()->where('family_id', $family->id)->count(),
             AppNotification::query()->where('family_id', $family->id)->count(),
-            Task::query()->where('family_id', $family->id)->count()
-                + Transaction::query()->where('family_id', $family->id)->count()
-                + AppNotification::query()->where('family_id', $family->id)->count(),
+            self::BULK_TASK_COUNT + self::BULK_TRANSACTION_COUNT + self::BULK_NOTIFICATION_COUNT,
         ));
     }
 
@@ -184,14 +193,36 @@ class DemoHhUserSeeder extends Seeder
     private function resetDemoFamily(): void
     {
         $primary = User::query()->where('email', self::PRIMARY_EMAIL)->first();
+        $familyId = $primary?->family_id;
 
-        if ($primary?->family_id === null) {
-            User::query()->whereIn('email', self::DEMO_EMAILS)->delete();
-
-            return;
+        if ($familyId !== null) {
+            $this->purgeFamilyData((string) $familyId);
         }
 
-        $familyId = $primary->family_id;
+        $orphanFamily = Family::query()->where('invite_code', 'HHFAMILY')->first();
+        if ($orphanFamily !== null && $orphanFamily->id !== $familyId) {
+            $this->purgeFamilyData((string) $orphanFamily->id);
+        }
+
+        User::query()
+            ->withTrashed()
+            ->whereIn('email', self::DEMO_EMAILS)
+            ->forceDelete();
+
+        $primary?->update(['family_id' => null]);
+    }
+
+    private function purgeFamilyData(string $familyId): void
+    {
+        if (\Illuminate\Support\Facades\Schema::hasTable('support_ticket_messages')) {
+            SupportTicketMessage::query()
+                ->whereIn('ticket_id', SupportTicket::query()->where('family_id', $familyId)->select('id'))
+                ->delete();
+        }
+
+        if (\Illuminate\Support\Facades\Schema::hasTable('support_tickets')) {
+            SupportTicket::query()->where('family_id', $familyId)->delete();
+        }
 
         AppNotification::query()->where('family_id', $familyId)->delete();
         Task::query()->where('family_id', $familyId)->delete();
@@ -205,13 +236,11 @@ class DemoHhUserSeeder extends Seeder
         Device::query()->whereIn('user_id', $memberIds)->delete();
 
         User::query()
+            ->withTrashed()
             ->where('family_id', $familyId)
             ->where('email', '!=', self::PRIMARY_EMAIL)
-            ->delete();
+            ->forceDelete();
 
-        User::query()->whereIn('email', self::DEMO_EMAILS)->delete();
-
-        $primary->update(['family_id' => null]);
         Family::query()->where('id', $familyId)->delete();
     }
 
