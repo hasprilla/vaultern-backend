@@ -14,6 +14,7 @@ use App\Models\Family;
 use App\Models\FamilyJoinRequest;
 use App\Models\FamilyMember;
 use App\Models\User;
+use App\Services\FamilyNotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -21,7 +22,10 @@ use Illuminate\Support\Str;
 
 class FamilyController extends Controller
 {
-    public function __construct(private readonly FamilyJoinRequestService $joinRequests) {}
+    public function __construct(
+        private readonly FamilyJoinRequestService $joinRequests,
+        private readonly FamilyNotificationService $notifications,
+    ) {}
     public function index(Request $request): JsonResponse
     {
         $family = Family::query()->findOrFail($request->user()->family_id);
@@ -120,6 +124,14 @@ class FamilyController extends Controller
             return response()->json(['message' => 'Forbidden'], 403);
         }
 
+        $this->notifications->notifyPartnerParents(
+            $request->user(),
+            'family_invite',
+            'Invitación enviada',
+            "{$request->user()->name} invitó a {$request->validated('email')} como {$request->validated('role')}",
+            ['email' => $request->validated('email')],
+        );
+
         return response()->json([
             'message' => 'Invitation sent successfully',
             'data'    => [
@@ -153,6 +165,14 @@ class FamilyController extends Controller
             'role'      => 'hijo',
             'status'    => 'active',
         ]);
+
+        $this->notifications->notifyPartnerParents(
+            $request->user(),
+            'family_child',
+            'Nuevo hijo/a registrado',
+            "{$request->user()->name} registró a {$child->name} en la familia",
+            ['entity_type' => 'user', 'entity_id' => (string) $child->id],
+        );
 
         return response()->json(['data' => new UserResource($child)], 201);
     }
@@ -189,6 +209,14 @@ class FamilyController extends Controller
             ->findOrFail($joinRequest);
 
         $user = $this->joinRequests->approve($model, $request->user());
+
+        $this->notifications->notifyPartnerParents(
+            $request->user(),
+            'family_join',
+            'Nuevo miembro en la familia',
+            "{$request->user()->name} aprobó la entrada de {$user->name}",
+            ['entity_type' => 'user', 'entity_id' => (string) $user->id],
+        );
 
         return response()->json([
             'message' => 'Solicitud aprobada. La persona ya puede iniciar sesión.',

@@ -8,12 +8,15 @@ use App\Domains\Finance\Entities\FinanceReportPeriod;
 use App\Http\Controllers\Controller;
 use App\Models\Budget;
 use App\Models\Transaction;
+use App\Services\FamilyNotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
 class FinanceController extends Controller
 {
+    public function __construct(private readonly FamilyNotificationService $notifications) {}
+
     public function index(Request $request): JsonResponse
     {
         if (! $request->user()->canManageFinances()) {
@@ -65,6 +68,16 @@ class FinanceController extends Controller
 
         $transaction->load('child');
 
+        $label = $validated['type'] === 'income' ? 'Ingreso' : 'Gasto';
+        $amount = number_format((float) $validated['amount'], 0, ',', '.');
+        $this->notifications->notifyPartnerParents(
+            $request->user(),
+            'finance_transaction',
+            "$label registrado",
+            "{$request->user()->name} registró $label por \$$amount COP",
+            ['entity_type' => 'transaction', 'entity_id' => $transaction->id],
+        );
+
         return response()->json(['data' => $transaction], 201);
     }
 
@@ -111,6 +124,14 @@ class FinanceController extends Controller
             'period'    => $validated['period'] ?? 'monthly',
         ]);
 
+        $this->notifications->notifyPartnerParents(
+            $request->user(),
+            'finance_budget',
+            'Presupuesto creado',
+            "{$request->user()->name} creó el presupuesto «{$budget->name}»",
+            ['entity_type' => 'budget', 'entity_id' => $budget->id],
+        );
+
         return response()->json(['data' => $budget], 201);
     }
 
@@ -128,6 +149,14 @@ class FinanceController extends Controller
         ]);
 
         $model->update($validated);
+
+        $this->notifications->notifyPartnerParents(
+            $request->user(),
+            'finance_budget',
+            'Presupuesto actualizado',
+            "{$request->user()->name} actualizó el presupuesto «{$model->name}»",
+            ['entity_type' => 'budget', 'entity_id' => $model->id],
+        );
 
         return response()->json(['data' => $model->fresh()]);
     }

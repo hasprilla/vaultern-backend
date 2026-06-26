@@ -6,11 +6,13 @@ namespace App\Http\Controllers\Api\V1\Ocr;
 
 use App\Http\Controllers\Controller;
 use App\Models\OcrJob;
+use App\Services\FamilyNotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class OcrController extends Controller
 {
+    public function __construct(private readonly FamilyNotificationService $notifications) {}
     public function processNotebook(Request $request): JsonResponse
     {
         return $this->process($request, 'handwriting');
@@ -63,6 +65,20 @@ class OcrController extends Controller
             'structured_data' => $structured,
             'confidence'      => $storedPath !== null ? 0.92 : 0.85,
         ]);
+
+        $typeLabel = match ($type) {
+            'handwriting' => 'cuaderno escolar',
+            'invoice'     => 'factura',
+            default       => 'documento',
+        };
+
+        $this->notifications->notifyPartnerParents(
+            $request->user(),
+            'ocr_scan',
+            'Documento escaneado',
+            "{$request->user()->name} digitalizó un $typeLabel con OCR",
+            ['entity_type' => 'ocr_job', 'entity_id' => $job->id],
+        );
 
         return response()->json(['data' => $job], 202);
     }
