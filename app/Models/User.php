@@ -92,4 +92,14 @@ class User extends Authenticatable
     {
         return $this->familyRole()->canManageTasks();
     }
+
+    public function canManageSupportTickets(): bool
+    {
+        return $this->familyRole()->canManageSupportTickets();
+    }
+
+    public function isSupportAgent(): bool
+    {
+        return $this->familyRole()->isSupport();
+    }
 }

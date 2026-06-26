@@ -15,7 +15,18 @@ class TenantMiddleware
     {
         $user = Auth::user();
 
-        if ($user === null || $user->family_id === null) {
+        if ($user === null) {
+            return response()->json(['error' => 'Tenant not found'], 403);
+        }
+
+        if ($user->isSupportAgent()) {
+            app()->instance('tenant_id', null);
+            app()->instance('is_support_agent', true);
+
+            return $next($request);
+        }
+
+        if ($user->family_id === null) {
             return response()->json(['error' => 'Tenant not found'], 403);
         }
 

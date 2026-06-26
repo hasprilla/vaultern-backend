@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\V1\Finance\FinanceController;
 use App\Http\Controllers\Api\V1\Notification\NotificationController;
 use App\Http\Controllers\Api\V1\Ocr\OcrController;
 use App\Http\Controllers\Api\V1\Profile\ProfileController;
+use App\Http\Controllers\Api\V1\Support\SupportController;
 use App\Http\Controllers\Api\V1\Task\TaskController;
 use Illuminate\Support\Facades\Route;
 
@@ -81,4 +82,10 @@ Route::prefix('v1')->middleware(['api.auth', 'tenant'])->group(function () {
     Route::get('/notifications', [NotificationController::class, 'index']);
     Route::post('/notifications', [NotificationController::class, 'store']);
     Route::patch('/notifications/{notification}/read', [NotificationController::class, 'markRead']);
+
+    Route::get('/support/tickets', [SupportController::class, 'index']);
+    Route::post('/support/tickets', [SupportController::class, 'store']);
+    Route::get('/support/tickets/{ticket}', [SupportController::class, 'show']);
+    Route::post('/support/tickets/{ticket}/messages', [SupportController::class, 'addMessage']);
+    Route::patch('/support/tickets/{ticket}', [SupportController::class, 'update']);
 });

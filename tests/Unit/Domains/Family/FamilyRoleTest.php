@@ -30,6 +30,11 @@ class FamilyRoleTest extends TestCase
         $this->assertSame('Hijo/a', FamilyRole::HIJO->label());
     }
 
+    public function test_soporte_has_correct_label(): void
+    {
+        $this->assertSame('Soporte', FamilyRole::SOPORTE->label());
+    }
+
     // ── canManageTasks ────────────────────────────────────
     public function test_padre_can_manage_tasks(): void
     {
@@ -49,6 +54,16 @@ class FamilyRoleTest extends TestCase
     public function test_hijo_cannot_manage_tasks(): void
     {
         $this->assertFalse(FamilyRole::HIJO->canManageTasks());
+    }
+
+    public function test_soporte_cannot_manage_tasks(): void
+    {
+        $this->assertFalse(FamilyRole::SOPORTE->canManageTasks());
+    }
+
+    public function test_soporte_can_manage_support_tickets(): void
+    {
+        $this->assertTrue(FamilyRole::SOPORTE->canManageSupportTickets());
     }
 
     // ── canManageFinances ─────────────────────────────────
@@ -100,6 +115,7 @@ class FamilyRoleTest extends TestCase
         $this->assertSame('madre',  FamilyRole::MADRE->value);
         $this->assertSame('tutor',  FamilyRole::TUTOR->value);
         $this->assertSame('hijo',   FamilyRole::HIJO->value);
+        $this->assertSame('soporte', FamilyRole::SOPORTE->value);
     }
 
     public function test_can_create_from_string_value(): void
@@ -108,6 +124,7 @@ class FamilyRoleTest extends TestCase
         $this->assertSame(FamilyRole::MADRE, FamilyRole::from('madre'));
         $this->assertSame(FamilyRole::TUTOR, FamilyRole::from('tutor'));
         $this->assertSame(FamilyRole::HIJO,  FamilyRole::from('hijo'));
+        $this->assertSame(FamilyRole::SOPORTE, FamilyRole::from('soporte'));
     }
 
     public function test_invalid_value_throws_exception(): void
@@ -116,8 +133,8 @@ class FamilyRoleTest extends TestCase
         FamilyRole::from('admin');
     }
 
-    public function test_all_roles_count_is_four(): void
+    public function test_all_roles_count_is_five(): void
     {
-        $this->assertCount(4, FamilyRole::cases());
+        $this->assertCount(5, FamilyRole::cases());
     }
 }
