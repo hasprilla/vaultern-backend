@@ -8,6 +8,9 @@ use App\Http\Controllers\Api\V1\Finance\FinanceController;
 use App\Http\Controllers\Api\V1\Notification\NotificationController;
 use App\Http\Controllers\Api\V1\Ocr\OcrController;
 use App\Http\Controllers\Api\V1\Profile\ProfileController;
+use App\Http\Controllers\Api\V1\School\SchoolBroadcastController;
+use App\Http\Controllers\Api\V1\School\SchoolEnrollmentController;
+use App\Http\Controllers\Api\V1\Subscription\SubscriptionController;
 use App\Http\Controllers\Api\V1\Support\SupportController;
 use App\Http\Controllers\Api\V1\Task\TaskController;
 use Illuminate\Support\Facades\Route;
@@ -88,4 +91,18 @@ Route::prefix('v1')->middleware(['api.auth', 'tenant'])->group(function () {
     Route::get('/support/tickets/{ticket}', [SupportController::class, 'show']);
     Route::post('/support/tickets/{ticket}/messages', [SupportController::class, 'addMessage']);
     Route::patch('/support/tickets/{ticket}', [SupportController::class, 'update']);
+
+    Route::get('/subscriptions/plans', [SubscriptionController::class, 'plans']);
+    Route::get('/subscriptions/current', [SubscriptionController::class, 'current']);
+    Route::post('/subscriptions/checkout', [SubscriptionController::class, 'checkout']);
+
+    Route::get('/school/lookup', [SchoolEnrollmentController::class, 'lookup']);
+    Route::get('/school/enrollments', [SchoolEnrollmentController::class, 'index']);
+    Route::post('/school/enrollments', [SchoolEnrollmentController::class, 'store']);
+
+    Route::get('/school/teachers/schools', [SchoolBroadcastController::class, 'schools']);
+    Route::get('/school/teachers/classes', [SchoolBroadcastController::class, 'classes']);
+    Route::get('/school/broadcasts', [SchoolBroadcastController::class, 'index']);
+    Route::post('/school/broadcasts', [SchoolBroadcastController::class, 'store']);
+    Route::get('/school/broadcasts/{broadcast}', [SchoolBroadcastController::class, 'show']);
 });

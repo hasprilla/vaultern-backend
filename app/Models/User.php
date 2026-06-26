@@ -98,8 +98,34 @@ class User extends Authenticatable
         return $this->familyRole()->canManageSupportTickets();
     }
 
+    public function canBroadcastSchoolTasks(): bool
+    {
+        return $this->familyRole()->canBroadcastSchoolTasks();
+    }
+
+    public function canManageSchool(): bool
+    {
+        return $this->familyRole()->canManageSchool();
+    }
+
     public function isSupportAgent(): bool
     {
         return $this->familyRole()->isSupport();
+    }
+
+    public function isSchoolStaff(): bool
+    {
+        return $this->familyRole()->canBroadcastSchoolTasks();
+    }
+
+    public function bypassesFamilyTenant(): bool
+    {
+        return $this->familyRole()->bypassesFamilyTenant();
+    }
+
+    /** @return HasMany<TeacherMembership> */
+    public function teacherMemberships(): HasMany
+    {
+        return $this->hasMany(TeacherMembership::class);
     }
 }

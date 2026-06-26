@@ -7,6 +7,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Str;
 
 class Family extends Model
@@ -54,5 +55,21 @@ class Family extends Model
     public function tasks(): HasMany
     {
         return $this->hasMany(Task::class);
+    }
+
+    public function subscription(): HasOne
+    {
+        return $this->hasOne(Subscription::class)->latestOfMany();
+    }
+
+    public function activePlanCode(): string
+    {
+        $subscription = $this->subscription;
+
+        if ($subscription !== null && $subscription->status === 'active') {
+            return $subscription->plan_code;
+        }
+
+        return $this->plan ?: 'free';
     }
 }

@@ -19,9 +19,10 @@ class TenantMiddleware
             return response()->json(['error' => 'Tenant not found'], 403);
         }
 
-        if ($user->isSupportAgent()) {
+        if ($user->bypassesFamilyTenant()) {
             app()->instance('tenant_id', null);
-            app()->instance('is_support_agent', true);
+            app()->instance('is_support_agent', $user->isSupportAgent());
+            app()->instance('is_school_staff', $user->isSchoolStaff());
 
             return $next($request);
         }

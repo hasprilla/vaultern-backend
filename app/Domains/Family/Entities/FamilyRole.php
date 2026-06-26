@@ -9,6 +9,8 @@ enum FamilyRole: string
     case TUTOR   = 'tutor';
     case HIJO    = 'hijo';
     case SOPORTE = 'soporte';
+    case DOCENTE = 'docente';
+    case ADMIN_ESCUELA = 'admin_escuela';
 
     public function label(): string
     {
@@ -18,7 +20,24 @@ enum FamilyRole: string
             self::TUTOR   => 'Tutor',
             self::HIJO    => 'Hijo/a',
             self::SOPORTE => 'Soporte',
+            self::DOCENTE => 'Docente',
+            self::ADMIN_ESCUELA => 'Admin escuela',
         };
+    }
+
+    public function bypassesFamilyTenant(): bool
+    {
+        return in_array($this, [self::SOPORTE, self::DOCENTE, self::ADMIN_ESCUELA], true);
+    }
+
+    public function canBroadcastSchoolTasks(): bool
+    {
+        return in_array($this, [self::DOCENTE, self::ADMIN_ESCUELA], true);
+    }
+
+    public function canManageSchool(): bool
+    {
+        return $this === self::ADMIN_ESCUELA;
     }
 
     public function canManageTasks(): bool

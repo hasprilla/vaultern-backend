@@ -22,6 +22,9 @@ class Task extends Model
         'family_id',
         'created_by',
         'assigned_to',
+        'source_broadcast_id',
+        'school_id',
+        'created_by_role',
         'title',
         'description',
         'status',
@@ -49,5 +52,15 @@ class Task extends Model
     public function assignee(): BelongsTo
     {
         return $this->belongsTo(User::class, 'assigned_to');
+    }
+
+    public function broadcast(): BelongsTo
+    {
+        return $this->belongsTo(SchoolTaskBroadcast::class, 'source_broadcast_id');
+    }
+
+    public function school(): BelongsTo
+    {
+        return $this->belongsTo(School::class);
     }
 }
