@@ -139,6 +139,11 @@ class SubscriptionCheckoutService
                     'status' => 'active',
                     'provider' => $isSimulated ? 'simulated' : 'manual',
                     'current_period_end' => $periodEnd,
+                    'cancelled_at' => null,
+                    'renewal_card_last4' => $cardMeta['last4'],
+                    'renewal_card_brand' => $cardMeta['brand'],
+                    'renewal_card_holder_name' => $cardMeta['holder'],
+                    'renewal_user_id' => $user->id,
                 ],
             );
 

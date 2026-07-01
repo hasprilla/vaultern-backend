@@ -11,8 +11,10 @@ use App\Models\SubscriptionPlan;
 use App\Services\PlanFeatureService;
 use App\Services\SubscriptionCancelService;
 use App\Services\SubscriptionCheckoutService;
+use App\Services\SubscriptionRenewalService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class SubscriptionController extends Controller
 {
@@ -20,13 +22,14 @@ class SubscriptionController extends Controller
         private readonly PlanFeatureService $planFeatures,
         private readonly SubscriptionCheckoutService $checkoutService,
         private readonly SubscriptionCancelService $cancelService,
+        private readonly SubscriptionRenewalService $renewalService,
     ) {}
 
     public function plans(): JsonResponse
     {
         $plans = SubscriptionPlan::query()
             ->where('is_active', true)
-            ->whereIn('code', ['free', 'family_plus', 'family_pro'])
+            ->whereNotIn('code', ['school'])
             ->orderBy('sort_order')
             ->get();
 
@@ -41,6 +44,16 @@ class SubscriptionController extends Controller
         }
 
         $subscription = $family->subscription;
+        if ($subscription?->isDueForRenewal()) {
+            $this->renewalService->renew($subscription);
+            $family->refresh()->load('subscription');
+            $subscription = $family->subscription;
+        }
+
+        $family->reconcileSubscriptionPlan();
+        $family->refresh()->load('subscription');
+
+        $subscription = $family->subscription;
         $features = $this->planFeatures->featuresForFamily($family);
 
         return response()->json([
@@ -52,6 +65,13 @@ class SubscriptionController extends Controller
                 'subscription' => $subscription,
                 'features' => $features,
                 'current_period_end' => $subscription?->current_period_end,
+                'cancelled_at' => $subscription?->cancelled_at,
+                'pending_cancellation' => $subscription?->isPendingCancellation() ?? false,
+                'access_until' => $subscription?->hasPaidAccess()
+                    ? $subscription?->current_period_end?->toDateString()
+                    : null,
+                'free_from' => $subscription?->freeFromDate()?->toIso8601String(),
+                'auto_renew' => ($subscription?->status === 'active' && $subscription?->cancelled_at === null) ?? false,
             ],
         ]);
     }
@@ -64,7 +84,13 @@ class SubscriptionController extends Controller
         }
 
         $validated = $request->validate([
-            'plan_code' => ['required', 'string', 'in:family_plus,family_pro'],
+            'plan_code' => [
+                'required',
+                'string',
+                Rule::exists('subscription_plans', 'code')
+                    ->where('is_active', true)
+                    ->whereNot('code', 'free'),
+            ],
             'billing' => ['nullable', 'string', 'in:monthly,yearly'],
             'simulated' => ['nullable', 'boolean'],
             'card_number' => ['required', 'string', 'min:13', 'max:23'],
@@ -97,7 +123,9 @@ class SubscriptionController extends Controller
         $result = $this->cancelService->cancel($family, $request->user());
 
         return response()->json([
-            'message' => 'Suscripción cancelada. Volviste al plan gratuito.',
+            'message' => 'Cancelación programada. Mantendrás tu plan hasta el '
+                .$result['access_until']
+                .'. El plan gratuito inicia al día siguiente.',
             'data'    => $result,
         ]);
     }

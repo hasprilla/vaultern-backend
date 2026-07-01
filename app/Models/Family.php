@@ -64,12 +64,26 @@ class Family extends Model
 
     public function activePlanCode(): string
     {
+        return $this->resolveActivePlanCode();
+    }
+
+    public function reconcileSubscriptionPlan(): void
+    {
+        $code = $this->resolveActivePlanCode();
+
+        if (($this->plan ?: 'free') !== $code) {
+            $this->update(['plan' => $code]);
+        }
+    }
+
+    private function resolveActivePlanCode(): string
+    {
         $subscription = $this->subscription;
 
-        if ($subscription !== null && $subscription->status === 'active') {
+        if ($subscription !== null && $subscription->hasPaidAccess()) {
             return $subscription->plan_code;
         }
 
-        return $this->plan ?: 'free';
+        return 'free';
     }
 }

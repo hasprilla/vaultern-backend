@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Models\Family;
-use App\Models\Subscription;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -24,29 +23,44 @@ class SubscriptionCancelService
             ]);
         }
 
+        if ($subscription->isPendingCancellation()) {
+            throw ValidationException::withMessages([
+                'plan' => 'La suscripción ya está programada para cancelarse al final del periodo.',
+            ]);
+        }
+
+        if ($subscription->status !== 'active') {
+            throw ValidationException::withMessages([
+                'plan' => 'No tienes una suscripción activa que cancelar.',
+            ]);
+        }
+
         return DB::transaction(function () use ($family, $subscription, $user) {
             $previousPlan = $subscription->plan_code;
+            $periodEnd = $subscription->current_period_end ?? now();
 
             $subscription->update([
-                'status'              => 'cancelled',
-                'current_period_end'  => now(),
+                'status'       => 'cancelled',
+                'cancelled_at' => now(),
             ]);
-
-            $family->update(['plan' => 'free']);
 
             $this->notifications->notifyFamily(
                 $user,
                 'subscription_cancel',
-                'Suscripción cancelada',
-                "{$user->name} canceló la suscripción (plan {$previousPlan})",
+                'Cancelación programada',
+                "{$user->name} programó la cancelación del plan {$previousPlan}. Acceso hasta {$periodEnd->toDateString()}.",
                 ['entity_type' => 'subscription', 'entity_id' => $subscription->id],
             );
 
             return [
-                'plan_code'      => 'free',
-                'previous_plan'  => $previousPlan,
-                'cancelled_at'   => now()->toIso8601String(),
-                'cancelled_by'   => $user->id,
+                'plan_code'           => $subscription->plan_code,
+                'previous_plan'       => $previousPlan,
+                'cancelled_at'        => now()->toIso8601String(),
+                'cancelled_by'        => $user->id,
+                'access_until'        => $periodEnd->toDateString(),
+                'current_period_end'  => $periodEnd->toIso8601String(),
+                'free_from'           => $subscription->fresh()->freeFromDate()?->toIso8601String(),
+                'pending_cancellation'=> true,
             ];
         });
     }
