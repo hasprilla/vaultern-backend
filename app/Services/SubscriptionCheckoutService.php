@@ -30,7 +30,13 @@ class SubscriptionCheckoutService
         $plan = SubscriptionPlan::query()
             ->where('code', $input['plan_code'])
             ->where('is_active', true)
-            ->firstOrFail();
+            ->first();
+
+        if ($plan === null) {
+            throw ValidationException::withMessages([
+                'plan_code' => 'Plan no disponible. Contacta soporte o intenta más tarde.',
+            ]);
+        }
 
         $billing = $input['billing'] ?? 'monthly';
         $isSimulated = (bool) ($input['simulated'] ?? true);

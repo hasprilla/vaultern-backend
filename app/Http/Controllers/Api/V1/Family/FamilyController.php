@@ -11,7 +11,6 @@ use App\Http\Requests\Api\V1\Family\InviteMemberRequest;
 use App\Http\Requests\Api\V1\Family\RegisterChildRequest;
 use App\Http\Resources\Api\V1\UserResource;
 use App\Models\Family;
-use App\Models\Family;
 use App\Models\FamilyJoinRequest;
 use App\Models\FamilyMember;
 use App\Models\User;
