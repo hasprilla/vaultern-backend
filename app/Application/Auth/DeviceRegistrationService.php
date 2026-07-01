@@ -23,12 +23,17 @@ class DeviceRegistrationService
             $device->id = (string) Str::uuid();
         }
 
-        $device->fill([
+        $attributes = [
             'platform'     => $platform,
-            'fcm_token'    => $fcmToken,
             'is_trusted'   => true,
             'last_seen_at' => now(),
-        ]);
+        ];
+
+        if ($fcmToken !== null && $fcmToken !== '') {
+            $attributes['fcm_token'] = $fcmToken;
+        }
+
+        $device->fill($attributes);
         $device->save();
 
         return $device;

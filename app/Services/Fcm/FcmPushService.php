@@ -59,6 +59,11 @@ class FcmPushService
             ->all();
 
         if ($tokens === []) {
+            Log::error('FCM verificación omitido: el usuario no tiene fcm_token en devices.', [
+                'user_id' => $user->id,
+                'email'   => $user->email,
+            ]);
+
             return;
         }
 
@@ -87,7 +92,9 @@ class FcmPushService
         $accessToken = $this->tokens->get($force);
         if ($accessToken === null) {
             if ($force) {
-                Log::info('FCM verificación omitido: sin credenciales Firebase.');
+                Log::error('FCM verificación omitido: sin credenciales Firebase.', [
+                    'credentials' => config('firebase.credentials'),
+                ]);
             }
 
             return;
@@ -120,7 +127,7 @@ class FcmPushService
             ]);
 
         if (! $response->successful()) {
-            Log::warning('FCM push falló', [
+            Log::error('FCM push falló', [
                 'status' => $response->status(),
                 'body'   => $response->body(),
             ]);

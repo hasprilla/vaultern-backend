@@ -57,7 +57,7 @@ class AuthController extends Controller
             $this->emailVerification->send($existing);
 
             return response()->json([
-                'message' => 'Te enviamos un código de verificación por notificación push.',
+                'message' => 'Te enviamos un código por notificación push y por correo electrónico.',
                 'data'    => [
                     'requires_verification' => true,
                     'email'                 => $existing->email,
@@ -91,7 +91,7 @@ class AuthController extends Controller
         $this->emailVerification->send($user);
 
         return response()->json([
-            'message' => 'Te enviamos un código de verificación por notificación push.',
+            'message' => 'Te enviamos un código por notificación push y por correo electrónico.',
             'data'    => [
                 'requires_verification' => true,
                 'email'                 => $user->email,
@@ -131,7 +131,7 @@ class AuthController extends Controller
         $this->registerDevice($request, $user);
         $this->emailVerification->send($user);
 
-        return response()->json(['message' => 'Código reenviado por notificación push.']);
+        return response()->json(['message' => 'Código reenviado por push y por correo electrónico.']);
     }
 
     public function join(JoinFamilyRequest $request): JsonResponse
