@@ -19,6 +19,10 @@ class ParentMessageController extends Controller
     {
         $this->assertFamilyAccess($request, $family);
 
+        if (! in_array($request->user()->role, ['padre', 'madre'], true)) {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
         $messages = ParentMessage::query()
             ->with('sender:id,name,role')
             ->where('family_id', $family)
@@ -32,7 +36,7 @@ class ParentMessageController extends Controller
     {
         $this->assertFamilyAccess($request, $family);
 
-        if (! in_array($request->user()->role, ['padre', 'madre', 'tutor'], true)) {
+        if (! in_array($request->user()->role, ['padre', 'madre'], true)) {
             return response()->json(['message' => 'Forbidden'], 403);
         }
 
