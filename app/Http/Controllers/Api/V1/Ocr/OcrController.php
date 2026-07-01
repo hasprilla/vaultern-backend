@@ -91,7 +91,7 @@ class OcrController extends Controller
             default       => 'documento',
         };
 
-        $this->notifications->notifyPartnerParents(
+        $this->notifications->notifyFamily(
             $request->user(),
             'ocr_scan',
             'Documento escaneado',

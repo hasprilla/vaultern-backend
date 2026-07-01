@@ -9,11 +9,14 @@ use App\Models\ClassEnrollment;
 use App\Models\School;
 use App\Models\SchoolClass;
 use App\Models\User;
+use App\Services\FamilyNotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class SchoolEnrollmentController extends Controller
 {
+    public function __construct(private readonly FamilyNotificationService $notifications) {}
+
     public function lookup(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -74,6 +77,14 @@ class SchoolEnrollmentController extends Controller
 
         $enrollment->load(['schoolClass.school', 'student']);
 
+        $this->notifications->notifyFamily(
+            $request->user(),
+            'school_enrollment',
+            'Inscripción escolar',
+            "{$request->user()->name} inscribió a {$student->name} en {$school->name}",
+            ['entity_type' => 'school_enrollment', 'entity_id' => $enrollment->id],
+        );
+
         return response()->json(['data' => $enrollment], 201);
     }
 
@@ -105,7 +116,19 @@ class SchoolEnrollmentController extends Controller
             return response()->json(['message' => 'No autorizado'], 403);
         }
 
+        $model->load(['schoolClass.school', 'student']);
+        $studentName = $model->student?->name ?? 'Alumno';
+        $schoolName = $model->schoolClass?->school?->name ?? 'Colegio';
+
         $model->update(['status' => 'cancelled']);
+
+        $this->notifications->notifyFamily(
+            $request->user(),
+            'school_enrollment',
+            'Inscripción cancelada',
+            "{$request->user()->name} canceló la inscripción de {$studentName} en {$schoolName}",
+            ['entity_type' => 'school_enrollment', 'entity_id' => $model->id],
+        );
 
         return response()->json(['message' => 'Vinculación con el colegio cancelada.']);
     }

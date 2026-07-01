@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Controllers\Concerns\ResolvesPagination;
 use App\Models\SupportTicket;
 use App\Models\SupportTicketMessage;
+use App\Services\FamilyNotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -16,6 +17,8 @@ use Illuminate\Validation\Rule;
 class SupportController extends Controller
 {
     use ResolvesPagination;
+
+    public function __construct(private readonly FamilyNotificationService $notifications) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -79,6 +82,16 @@ class SupportController extends Controller
 
         $ticket->load(['requester:id,name,email', 'assignee:id,name', 'messages.author:id,name']);
 
+        if ($user->family_id !== null) {
+            $this->notifications->notifyFamily(
+                $user,
+                'support_ticket',
+                'Ticket de soporte',
+                "{$user->name} abrió un ticket: {$ticket->subject}",
+                ['entity_type' => 'support_ticket', 'entity_id' => $ticket->id],
+            );
+        }
+
         return response()->json(['data' => $ticket], 201);
     }
 
@@ -140,6 +153,26 @@ class SupportController extends Controller
 
         $message->load('author:id,name');
 
+        if ($isStaff && $ticket->family_id !== null) {
+            $this->notifications->notifyFamilyById(
+                $ticket->family_id,
+                (int) $user->id,
+                'support_message',
+                'Respuesta de soporte',
+                "Soporte respondió en «{$ticket->subject}»",
+                ['entity_type' => 'support_ticket', 'entity_id' => $ticket->id],
+                [(int) $ticket->user_id],
+            );
+        } elseif (! $isStaff && $user->family_id !== null) {
+            $this->notifications->notifyFamily(
+                $user,
+                'support_message',
+                'Mensaje en ticket',
+                "{$user->name} respondió en «{$ticket->subject}»",
+                ['entity_type' => 'support_ticket', 'entity_id' => $ticket->id],
+            );
+        }
+
         return response()->json(['data' => $message], 201);
     }
 
@@ -157,6 +190,18 @@ class SupportController extends Controller
 
         $ticket->update($validated);
         $ticket->load(['requester:id,name,email', 'assignee:id,name']);
+
+        if ($ticket->family_id !== null) {
+            $this->notifications->notifyFamilyById(
+                $ticket->family_id,
+                (int) $request->user()->id,
+                'support_ticket',
+                'Ticket actualizado',
+                "El estado de «{$ticket->subject}» cambió a {$ticket->status}",
+                ['entity_type' => 'support_ticket', 'entity_id' => $ticket->id],
+                [(int) $ticket->user_id],
+            );
+        }
 
         return response()->json(['data' => $ticket]);
     }

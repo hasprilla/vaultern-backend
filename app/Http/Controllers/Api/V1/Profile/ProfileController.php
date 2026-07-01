@@ -16,6 +16,7 @@ use App\Http\Resources\Api\V1\UserResource;
 use App\Infrastructure\Auth\TokenService;
 use App\Models\FamilyMember;
 use App\Models\User;
+use App\Services\FamilyNotificationService;
 use App\Support\NotificationPreferences;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -23,12 +24,25 @@ use Illuminate\Support\Facades\Hash;
 
 class ProfileController extends Controller
 {
-    public function __construct(private readonly TokenService $tokens) {}
+    public function __construct(
+        private readonly TokenService $tokens,
+        private readonly FamilyNotificationService $notifications,
+    ) {}
 
     public function update(UpdateProfileRequest $request): JsonResponse
     {
         $user = $request->user();
         $user->update($request->validated());
+
+        if ($user->family_id !== null) {
+            $this->notifications->notifyFamily(
+                $user,
+                'profile_updated',
+                'Perfil actualizado',
+                "{$user->name} actualizó su perfil",
+                ['entity_type' => 'user', 'entity_id' => (string) $user->id],
+            );
+        }
 
         return response()->json([
             'message' => 'Perfil actualizado.',
@@ -38,9 +52,20 @@ class ProfileController extends Controller
 
     public function changePassword(ChangePasswordRequest $request): JsonResponse
     {
-        $request->user()->update([
+        $user = $request->user();
+        $user->update([
             'password' => Hash::make($request->validated('password')),
         ]);
+
+        if ($user->family_id !== null) {
+            $this->notifications->notifyFamily(
+                $user,
+                'profile_updated',
+                'Contraseña cambiada',
+                "{$user->name} cambió su contraseña",
+                ['entity_type' => 'user', 'entity_id' => (string) $user->id],
+            );
+        }
 
         return response()->json([
             'message' => 'Contraseña actualizada correctamente.',
@@ -102,6 +127,16 @@ class ProfileController extends Controller
     {
         $user = $request->user();
 
+        if ($user->family_id !== null) {
+            $this->notifications->notifyFamily(
+                $user,
+                'profile_updated',
+                'Cuenta desactivada',
+                "{$user->name} desactivó su cuenta temporalmente",
+                ['entity_type' => 'user', 'entity_id' => (string) $user->id],
+            );
+        }
+
         DB::transaction(function () use ($user) {
             $user->update([
                 'account_status'  => 'deactivated',
@@ -141,6 +176,16 @@ class ProfileController extends Controller
             ->where('user_id', $user->id)
             ->update(['status' => 'active']);
 
+        if ($user->family_id !== null) {
+            $this->notifications->notifyFamily(
+                $user,
+                'profile_updated',
+                'Cuenta reactivada',
+                "{$user->name} reactivó su cuenta",
+                ['entity_type' => 'user', 'entity_id' => (string) $user->id],
+            );
+        }
+
         $tokenData = $this->tokens->issue($user);
 
         return response()->json([
@@ -155,6 +200,16 @@ class ProfileController extends Controller
     public function destroy(ConfirmPasswordRequest $request): JsonResponse
     {
         $user = $request->user();
+
+        if ($user->family_id !== null) {
+            $this->notifications->notifyFamily(
+                $user,
+                'profile_updated',
+                'Cuenta eliminada',
+                "{$user->name} eliminó su cuenta permanentemente",
+                ['entity_type' => 'user', 'entity_id' => (string) $user->id],
+            );
+        }
 
         DB::transaction(function () use ($user) {
             $this->tokens->revoke($user);

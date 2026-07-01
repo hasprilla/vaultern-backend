@@ -16,7 +16,10 @@ use Illuminate\Validation\ValidationException;
 
 class SubscriptionCheckoutService
 {
-    public function __construct(private readonly SimulatedCardPaymentService $cardPayments) {}
+    public function __construct(
+        private readonly SimulatedCardPaymentService $cardPayments,
+        private readonly FamilyNotificationService $notifications,
+    ) {}
 
     /**
      * @param  array<string, mixed>  $input
@@ -120,6 +123,14 @@ class SubscriptionCheckoutService
                 'plan_code' => $plan->code,
                 'current_period_end' => $periodEnd->toIso8601String(),
             ]);
+
+            $this->notifications->notifyFamily(
+                $user,
+                'subscription_checkout',
+                'Plan activado',
+                "{$user->name} activó el plan {$plan->code}",
+                ['entity_type' => 'subscription', 'entity_id' => $subscription->id],
+            );
 
             return [
                 'message' => $isSimulated

@@ -102,6 +102,16 @@ class FamilyController extends Controller
         $model = Family::query()->findOrFail($family);
         $model->update($validated);
 
+        if ($validated !== []) {
+            $this->notifications->notifyFamily(
+                $request->user(),
+                'family_updated',
+                'Familia actualizada',
+                "{$request->user()->name} actualizó los datos de la familia",
+                ['entity_type' => 'family', 'entity_id' => $family],
+            );
+        }
+
         return response()->json(['data' => $model->only(['id', 'name', 'plan'])]);
     }
 
@@ -124,7 +134,7 @@ class FamilyController extends Controller
             return response()->json(['message' => 'Forbidden'], 403);
         }
 
-        $this->notifications->notifyPartnerParents(
+        $this->notifications->notifyFamily(
             $request->user(),
             'family_invite',
             'Invitación enviada',
@@ -166,7 +176,7 @@ class FamilyController extends Controller
             'status'    => 'active',
         ]);
 
-        $this->notifications->notifyPartnerParents(
+        $this->notifications->notifyFamily(
             $request->user(),
             'family_child',
             'Nuevo hijo/a registrado',
@@ -214,7 +224,7 @@ class FamilyController extends Controller
 
         $user = $this->joinRequests->approve($model, $request->user());
 
-        $this->notifications->notifyPartnerParents(
+        $this->notifications->notifyFamily(
             $request->user(),
             'family_join',
             'Nuevo miembro en la familia',
@@ -238,6 +248,14 @@ class FamilyController extends Controller
 
         $this->joinRequests->reject($model, $request->user());
 
+        $this->notifications->notifyFamily(
+            $request->user(),
+            'family_join',
+            'Solicitud rechazada',
+            "{$request->user()->name} rechazó la solicitud de {$model->name}",
+            ['entity_type' => 'join_request', 'entity_id' => $model->id],
+        );
+
         return response()->json(['message' => 'Solicitud rechazada']);
     }
 
@@ -260,6 +278,15 @@ class FamilyController extends Controller
 
         $membership->update(['role' => $validated['role']]);
         User::query()->where('id', $member)->update(['role' => $validated['role']]);
+
+        $memberUser = User::query()->findOrFail($member);
+        $this->notifications->notifyFamily(
+            $request->user(),
+            'family_updated',
+            'Rol actualizado',
+            "{$request->user()->name} cambió el rol de {$memberUser->name} a {$validated['role']}",
+            ['entity_type' => 'user', 'entity_id' => $member],
+        );
 
         return response()->json([
             'message' => 'Role updated successfully',

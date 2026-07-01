@@ -154,6 +154,19 @@ class FcmPushService
             return $prefs['reminders'] ?? true;
         }
 
+        if (str_starts_with($type, 'school_')) {
+            return $prefs['family'] ?? true;
+        }
+        if (str_starts_with($type, 'support_')) {
+            return $prefs['reminders'] ?? true;
+        }
+        if (str_starts_with($type, 'subscription_')) {
+            return $prefs['finance'] ?? true;
+        }
+        if (str_starts_with($type, 'profile_')) {
+            return $prefs['family'] ?? true;
+        }
+
         return true;
     }
 }

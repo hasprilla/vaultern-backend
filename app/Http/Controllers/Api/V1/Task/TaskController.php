@@ -84,23 +84,15 @@ class TaskController extends Controller
 
         $task->load(['creator', 'assignee']);
 
-        $recipients = [];
-        if ($task->assigned_to) {
-            $recipients[] = (int) $task->assigned_to;
-        }
-        $this->notifications->notifyUsers(
+        $body = $task->assigned_to && $task->assignee !== null
+            ? "{$request->user()->name} creó «{$task->title}» y la asignó a {$task->assignee->name}"
+            : "{$request->user()->name} creó la tarea «{$task->title}»";
+
+        $this->notifications->notifyFamily(
             $request->user(),
-            $recipients,
             'task_created',
             'Nueva tarea',
-            "{$request->user()->name} creó la tarea «{$task->title}»",
-            ['entity_type' => 'task', 'entity_id' => $task->id],
-        );
-        $this->notifications->notifyPartnerParents(
-            $request->user(),
-            'task_created',
-            'Nueva tarea familiar',
-            "{$request->user()->name} creó la tarea «{$task->title}»",
+            $body,
             ['entity_type' => 'task', 'entity_id' => $task->id],
         );
 
@@ -133,7 +125,7 @@ class TaskController extends Controller
         $model->update($validated);
         $model = $model->fresh(['creator', 'assignee']);
 
-        $this->notifications->notifyPartnerParents(
+        $this->notifications->notifyFamily(
             $request->user(),
             'task_updated',
             'Tarea actualizada',
@@ -154,7 +146,7 @@ class TaskController extends Controller
         $title = $model->title;
         $model->delete();
 
-        $this->notifications->notifyPartnerParents(
+        $this->notifications->notifyFamily(
             $request->user(),
             'task_deleted',
             'Tarea eliminada',
@@ -176,7 +168,7 @@ class TaskController extends Controller
 
         $model = $model->fresh(['creator', 'assignee']);
 
-        $this->notifications->notifyPartnerParents(
+        $this->notifications->notifyFamily(
             $request->user(),
             'task_completed',
             'Tarea completada',
@@ -201,18 +193,10 @@ class TaskController extends Controller
         $model->update(['assigned_to' => $validated['assigned_to']]);
         $model = $model->fresh(['assignee']);
 
-        $this->notifications->notifyUsers(
+        $this->notifications->notifyFamily(
             $request->user(),
-            [(int) $validated['assigned_to']],
             'task_assigned',
             'Tarea asignada',
-            "{$request->user()->name} te asignó «{$model->title}»",
-            ['entity_type' => 'task', 'entity_id' => $model->id],
-        );
-        $this->notifications->notifyPartnerParents(
-            $request->user(),
-            'task_assigned',
-            'Tarea reasignada',
             "{$request->user()->name} asignó «{$model->title}» a {$model->assignee?->name}",
             ['entity_type' => 'task', 'entity_id' => $model->id],
         );

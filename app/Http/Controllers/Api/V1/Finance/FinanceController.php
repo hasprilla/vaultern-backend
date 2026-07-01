@@ -73,7 +73,7 @@ class FinanceController extends Controller
 
         $label = $validated['type'] === 'income' ? 'Ingreso' : 'Gasto';
         $amount = number_format((float) $validated['amount'], 0, ',', '.');
-        $this->notifications->notifyPartnerParents(
+        $this->notifications->notifyFamily(
             $request->user(),
             'finance_transaction',
             "$label registrado",
@@ -102,7 +102,16 @@ class FinanceController extends Controller
         }
 
         $model = Transaction::query()->findOrFail($transaction);
+        $description = $model->description ?? 'Transacción';
         $model->delete();
+
+        $this->notifications->notifyFamily(
+            $request->user(),
+            'finance_transaction',
+            'Transacción eliminada',
+            "{$request->user()->name} eliminó «{$description}»",
+            ['entity_type' => 'transaction', 'entity_id' => $transaction],
+        );
 
         return response()->json(['message' => 'Transacción eliminada.']);
     }
@@ -139,7 +148,7 @@ class FinanceController extends Controller
             'period'    => $validated['period'] ?? 'monthly',
         ]);
 
-        $this->notifications->notifyPartnerParents(
+        $this->notifications->notifyFamily(
             $request->user(),
             'finance_budget',
             'Presupuesto creado',
@@ -165,7 +174,7 @@ class FinanceController extends Controller
 
         $model->update($validated);
 
-        $this->notifications->notifyPartnerParents(
+        $this->notifications->notifyFamily(
             $request->user(),
             'finance_budget',
             'Presupuesto actualizado',

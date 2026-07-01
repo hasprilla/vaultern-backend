@@ -12,6 +12,8 @@ use Illuminate\Validation\ValidationException;
 
 class SubscriptionCancelService
 {
+    public function __construct(private readonly FamilyNotificationService $notifications) {}
+
     public function cancel(Family $family, User $user): array
     {
         $subscription = $family->subscription;
@@ -31,6 +33,14 @@ class SubscriptionCancelService
             ]);
 
             $family->update(['plan' => 'free']);
+
+            $this->notifications->notifyFamily(
+                $user,
+                'subscription_cancel',
+                'Suscripción cancelada',
+                "{$user->name} canceló la suscripción (plan {$previousPlan})",
+                ['entity_type' => 'subscription', 'entity_id' => $subscription->id],
+            );
 
             return [
                 'plan_code'      => 'free',

@@ -22,6 +22,7 @@ use App\Infrastructure\Auth\TokenService;
 use App\Models\Family;
 use App\Models\FamilyMember;
 use App\Models\User;
+use App\Services\FamilyNotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -35,6 +36,7 @@ class AuthController extends Controller
         private readonly FamilyJoinRequestService $joinRequests,
         private readonly EmailVerificationService $emailVerification,
         private readonly PasswordResetService $passwordReset,
+        private readonly FamilyNotificationService $notifications,
     ) {}
 
     public function register(RegisterRequest $request): JsonResponse
@@ -153,6 +155,26 @@ class AuthController extends Controller
             $request->validated('email'),
             $request->validated('password'),
             $request->validated('role'),
+        );
+
+        $parentIds = User::query()
+            ->where('family_id', $family->id)
+            ->whereIn('role', ['padre', 'madre'])
+            ->pluck('id')
+            ->all();
+
+        $this->notifications->notifyFamilyById(
+            $family->id,
+            null,
+            'family_join_request',
+            'Nueva solicitud de unión',
+            "{$request->validated('name')} quiere unirse como {$request->validated('role')}",
+            [
+                'entity_type' => 'join_request',
+                'entity_id'   => $joinRequest->id,
+                'actor_name'  => $request->validated('name'),
+            ],
+            $parentIds,
         );
 
         return response()->json([

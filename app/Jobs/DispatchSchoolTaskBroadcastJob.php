@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace App\Jobs;
 
-use App\Models\AppNotification;
 use App\Models\ClassEnrollment;
 use App\Models\SchoolTaskBroadcast;
 use App\Models\Task;
 use App\Models\User;
+use App\Services\FamilyNotificationService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Str;
@@ -19,7 +19,7 @@ class DispatchSchoolTaskBroadcastJob implements ShouldQueue
 
     public function __construct(public string $broadcastId) {}
 
-    public function handle(): void
+    public function handle(FamilyNotificationService $notifications): void
     {
         $broadcast = SchoolTaskBroadcast::query()
             ->with(['school', 'schoolClass', 'creator'])
@@ -48,28 +48,42 @@ class DispatchSchoolTaskBroadcastJob implements ShouldQueue
 
         foreach ($enrollments as $enrollment) {
             $student = $enrollment->student;
-            if ($student === null || $enrollment->family_id === null) {
+            if ($student === null || $enrollment->family_id === null || $teacher === null) {
                 continue;
             }
 
             $task = Task::query()->create([
-                'id'                 => (string) Str::uuid(),
-                'family_id'          => $enrollment->family_id,
-                'source_broadcast_id'=> $broadcast->id,
-                'school_id'          => $broadcast->school_id,
-                'created_by'         => $teacher->id,
-                'created_by_role'    => $teacher->role,
-                'assigned_to'        => $student->id,
-                'title'              => $broadcast->title,
-                'description'        => $broadcast->description,
-                'priority'           => $broadcast->priority,
-                'due_date'           => $broadcast->due_date,
-                'is_school'          => true,
-                'subject'            => $broadcast->subject,
-                'status'             => 'pending',
+                'id'                  => (string) Str::uuid(),
+                'family_id'           => $enrollment->family_id,
+                'source_broadcast_id' => $broadcast->id,
+                'school_id'           => $broadcast->school_id,
+                'created_by'          => $teacher->id,
+                'created_by_role'     => $teacher->role,
+                'assigned_to'         => $student->id,
+                'title'               => $broadcast->title,
+                'description'         => $broadcast->description,
+                'priority'            => $broadcast->priority,
+                'due_date'            => $broadcast->due_date,
+                'is_school'           => true,
+                'subject'             => $broadcast->subject,
+                'status'              => 'pending',
             ]);
 
-            $this->notifyFamily($enrollment->family_id, $student, $teacher, $task->id, $broadcast->title);
+            $notifications->notifyFamilyById(
+                $enrollment->family_id,
+                (int) $teacher->id,
+                'school_task_broadcast',
+                'Tarea escolar',
+                "{$teacher->name} envió «{$broadcast->title}» para {$student->name}",
+                [
+                    'entity_type' => 'task',
+                    'entity_id'   => $task->id,
+                    'broadcast'   => true,
+                    'actor_id'    => $teacher->id,
+                    'actor_name'  => $teacher->name,
+                ],
+            );
+
             $created++;
         }
 
@@ -77,35 +91,5 @@ class DispatchSchoolTaskBroadcastJob implements ShouldQueue
             'status'        => 'completed',
             'tasks_created' => $created,
         ]);
-    }
-
-    private function notifyFamily(
-        string $familyId,
-        User $student,
-        User $teacher,
-        string $taskId,
-        string $title,
-    ): void {
-        $recipientIds = User::query()
-            ->where('family_id', $familyId)
-            ->whereIn('role', ['padre', 'madre', 'tutor', 'hijo'])
-            ->pluck('id')
-            ->all();
-
-        foreach ($recipientIds as $userId) {
-            AppNotification::query()->create([
-                'id'        => (string) Str::uuid(),
-                'family_id' => $familyId,
-                'user_id'   => $userId,
-                'type'      => 'school_task_broadcast',
-                'title'     => 'Tarea escolar',
-                'body'      => "{$teacher->name} envió «{$title}» para {$student->name}",
-                'data'      => [
-                    'entity_type' => 'task',
-                    'entity_id'   => $taskId,
-                    'broadcast'   => true,
-                ],
-            ]);
-        }
     }
 }
