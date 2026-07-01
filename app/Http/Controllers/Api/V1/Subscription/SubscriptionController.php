@@ -76,6 +76,14 @@ class SubscriptionController extends Controller
 
         $result = $this->checkoutService->checkout($family, $request->user(), $validated);
 
+        if (($result['success'] ?? true) === false) {
+            return response()->json([
+                'message' => $result['message'] ?? 'Pago rechazado',
+                'code'    => 'payment_declined',
+                'data'    => $result,
+            ], 422);
+        }
+
         return response()->json(['data' => $result], 201);
     }
 

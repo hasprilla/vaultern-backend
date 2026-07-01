@@ -82,12 +82,15 @@ class SubscriptionCheckoutService
                     'card_last4' => $cardMeta['last4'],
                 ]);
 
-                $this->cardPayments->simulateCharge($cardMeta['last4']);
-
                 $payment->update([
                     'card_brand' => $cardMeta['brand'],
                     'card_last4' => $cardMeta['last4'],
                     'card_holder_name' => $cardMeta['holder'],
+                ]);
+
+                $this->cardPayments->simulateCharge($cardMeta['last4']);
+
+                $payment->update([
                     'status' => 'succeeded',
                     'paid_at' => now(),
                 ]);
@@ -104,7 +107,25 @@ class SubscriptionCheckoutService
                 $this->logEvent($payment, $user, 'payment_failed', $reason, [
                     'errors' => $e->errors(),
                 ]);
-                throw $e;
+
+                $this->notifications->notifyFamily(
+                    $user,
+                    'subscription_payment_failed',
+                    'Pago rechazado',
+                    "{$user->name}: {$reason} (ref. {$reference})",
+                    ['entity_type' => 'subscription_payment', 'entity_id' => $payment->id],
+                );
+
+                return [
+                    'success' => false,
+                    'message' => $reason,
+                    'plan_code' => $plan->code,
+                    'billing' => $billing,
+                    'mode' => $isSimulated ? 'simulated' : 'live',
+                    'payment' => $payment->fresh(['events']),
+                    'subscription' => null,
+                    'checkout_url' => null,
+                ];
             }
 
             $periodEnd = $billing === 'yearly' ? now()->addYear() : now()->addMonth();
@@ -139,6 +160,7 @@ class SubscriptionCheckoutService
             );
 
             return [
+                'success' => true,
                 'message' => $isSimulated
                     ? 'Plan activado. Pago simulado registrado.'
                     : 'Plan activado correctamente.',
