@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1\Ocr;
 
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Concerns\ResolvesPagination;
 use App\Models\OcrJob;
 use App\Services\FamilyNotificationService;
 use Illuminate\Http\JsonResponse;
@@ -12,7 +13,25 @@ use Illuminate\Http\Request;
 
 class OcrController extends Controller
 {
+    use ResolvesPagination;
+
     public function __construct(private readonly FamilyNotificationService $notifications) {}
+
+    public function index(Request $request): JsonResponse
+    {
+        $query = OcrJob::query()->orderByDesc('created_at');
+
+        if ($request->filled('type')) {
+            $query->where('type', $request->string('type'));
+        }
+
+        if ($request->filled('status')) {
+            $query->where('status', $request->string('status'));
+        }
+
+        return response()->json($query->paginate($this->perPage($request)));
+    }
+
     public function processNotebook(Request $request): JsonResponse
     {
         return $this->process($request, 'handwriting');

@@ -5,9 +5,13 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1\Profile;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\V1\Profile\ChangePasswordRequest;
 use App\Http\Requests\Api\V1\Profile\ConfirmPasswordRequest;
 use App\Http\Requests\Api\V1\Profile\ReactivateAccountRequest;
+use App\Http\Requests\Api\V1\Profile\UpdateFcmTokenRequest;
 use App\Http\Requests\Api\V1\Profile\UpdateNotificationPreferencesRequest;
+use App\Http\Requests\Api\V1\Profile\UpdateProfileRequest;
+use App\Models\Device;
 use App\Http\Resources\Api\V1\UserResource;
 use App\Infrastructure\Auth\TokenService;
 use App\Models\FamilyMember;
@@ -20,6 +24,56 @@ use Illuminate\Support\Facades\Hash;
 class ProfileController extends Controller
 {
     public function __construct(private readonly TokenService $tokens) {}
+
+    public function update(UpdateProfileRequest $request): JsonResponse
+    {
+        $user = $request->user();
+        $user->update($request->validated());
+
+        return response()->json([
+            'message' => 'Perfil actualizado.',
+            'data'    => new UserResource($user->fresh()),
+        ]);
+    }
+
+    public function changePassword(ChangePasswordRequest $request): JsonResponse
+    {
+        $request->user()->update([
+            'password' => Hash::make($request->validated('password')),
+        ]);
+
+        return response()->json([
+            'message' => 'Contraseña actualizada correctamente.',
+        ]);
+    }
+
+    public function updateFcmToken(UpdateFcmTokenRequest $request): JsonResponse
+    {
+        $user = $request->user();
+        $token = $request->validated('fcm_token');
+
+        $query = Device::query()->where('user_id', $user->id);
+
+        if ($user->device_fingerprint) {
+            $query->where('device_fingerprint', $user->device_fingerprint);
+        }
+
+        $updated = $query->orderByDesc('last_seen_at')->limit(1)->update([
+            'fcm_token'    => $token,
+            'last_seen_at' => now(),
+        ]);
+
+        if ($updated === 0 && $user->device_fingerprint) {
+            app(\App\Application\Auth\DeviceRegistrationService::class)->register(
+                $user,
+                $user->device_fingerprint,
+                null,
+                $token,
+            );
+        }
+
+        return response()->json(['message' => 'Token FCM actualizado.']);
+    }
 
     public function notificationPreferences(): JsonResponse
     {

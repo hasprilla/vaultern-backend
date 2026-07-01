@@ -6,10 +6,12 @@ namespace App\Services;
 
 use App\Models\AppNotification;
 use App\Models\User;
+use App\Services\Fcm\FcmPushService;
 use Illuminate\Support\Str;
 
 class FamilyNotificationService
 {
+    public function __construct(private readonly FcmPushService $fcm) {}
     /**
      * Notifica a los padres/madres de la familia excepto quien ejecutó la acción.
      *
@@ -62,7 +64,7 @@ class FamilyNotificationService
                 continue;
             }
 
-            AppNotification::query()->create([
+            $notification = AppNotification::query()->create([
                 'id'        => (string) Str::uuid(),
                 'family_id' => $actor->family_id,
                 'user_id'   => $userId,
@@ -71,6 +73,19 @@ class FamilyNotificationService
                 'body'      => $body,
                 'data'      => $payload,
             ]);
+
+            $recipient = User::query()->find($userId);
+            if ($recipient !== null) {
+                $this->fcm->sendToUser(
+                    $recipient,
+                    $title,
+                    $body,
+                    $type,
+                    array_merge($payload, [
+                        'notification_id' => $notification->id,
+                    ]),
+                );
+            }
         }
     }
 }

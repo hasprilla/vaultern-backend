@@ -95,6 +95,18 @@ class FinanceController extends Controller
         ]);
     }
 
+    public function destroy(Request $request, string $transaction): JsonResponse
+    {
+        if (! $request->user()->canManageFinances()) {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
+        $model = Transaction::query()->findOrFail($transaction);
+        $model->delete();
+
+        return response()->json(['message' => 'Transacción eliminada.']);
+    }
+
     public function budgetsIndex(Request $request): JsonResponse
     {
         if (! $request->user()->canManageFinances()) {

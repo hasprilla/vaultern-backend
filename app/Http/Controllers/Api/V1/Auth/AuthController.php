@@ -6,12 +6,15 @@ namespace App\Http\Controllers\Api\V1\Auth;
 
 use App\Application\Auth\DeviceRegistrationService;
 use App\Application\Auth\EmailVerificationService;
+use App\Application\Auth\PasswordResetService;
 use App\Application\Family\FamilyJoinRequestService;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\V1\Auth\ForgotPasswordRequest;
 use App\Http\Requests\Api\V1\Auth\JoinFamilyRequest;
 use App\Http\Requests\Api\V1\Auth\LoginRequest;
 use App\Http\Requests\Api\V1\Auth\RegisterRequest;
 use App\Http\Requests\Api\V1\Auth\ResendVerificationRequest;
+use App\Http\Requests\Api\V1\Auth\ResetPasswordRequest;
 use App\Http\Requests\Api\V1\Auth\VerifyEmailRequest;
 use App\Http\Resources\Api\V1\SessionResource;
 use App\Http\Resources\Api\V1\UserResource;
@@ -31,6 +34,7 @@ class AuthController extends Controller
         private readonly DeviceRegistrationService $devices,
         private readonly FamilyJoinRequestService $joinRequests,
         private readonly EmailVerificationService $emailVerification,
+        private readonly PasswordResetService $passwordReset,
     ) {}
 
     public function register(RegisterRequest $request): JsonResponse
@@ -49,10 +53,11 @@ class AuthController extends Controller
                 ->where('user_id', $existing->id)
                 ->update(['role' => $existing->role]);
 
+            $this->registerDevice($request, $existing);
             $this->emailVerification->send($existing);
 
             return response()->json([
-                'message' => 'Revisa tu correo e ingresa el código de verificación.',
+                'message' => 'Te enviamos un código de verificación por notificación push.',
                 'data'    => [
                     'requires_verification' => true,
                     'email'                 => $existing->email,
@@ -82,10 +87,11 @@ class AuthController extends Controller
             'status'    => 'active',
         ]);
 
+        $this->registerDevice($request, $user);
         $this->emailVerification->send($user);
 
         return response()->json([
-            'message' => 'Revisa tu correo e ingresa el código de verificación.',
+            'message' => 'Te enviamos un código de verificación por notificación push.',
             'data'    => [
                 'requires_verification' => true,
                 'email'                 => $user->email,
@@ -122,9 +128,10 @@ class AuthController extends Controller
             return response()->json(['message' => 'Esta cuenta ya está verificada.']);
         }
 
+        $this->registerDevice($request, $user);
         $this->emailVerification->send($user);
 
-        return response()->json(['message' => 'Código reenviado. Revisa tu bandeja de entrada.']);
+        return response()->json(['message' => 'Código reenviado por notificación push.']);
     }
 
     public function join(JoinFamilyRequest $request): JsonResponse
@@ -156,6 +163,29 @@ class AuthController extends Controller
                 'inviter'    => $inviter->only(['id', 'name']),
             ],
         ], 202);
+    }
+
+    public function forgotPassword(ForgotPasswordRequest $request): JsonResponse
+    {
+        $this->passwordReset->send($request->validated('email'));
+
+        return response()->json([
+            'message' => 'Si el email existe, enviaremos un código para restablecer tu contraseña.',
+        ]);
+    }
+
+    public function resetPassword(ResetPasswordRequest $request): JsonResponse
+    {
+        $validated = $request->validated();
+        $this->passwordReset->reset(
+            $validated['email'],
+            $validated['code'],
+            $validated['password'],
+        );
+
+        return response()->json([
+            'message' => 'Contraseña restablecida. Ya puedes iniciar sesión.',
+        ]);
     }
 
     public function login(LoginRequest $request): JsonResponse
@@ -243,5 +273,20 @@ class AuthController extends Controller
                 'user' => $user,
             ]),
         ]);
+    }
+
+    private function registerDevice(RegisterRequest|ResendVerificationRequest $request, User $user): void
+    {
+        $deviceId = $request->validated('device_id');
+        if (! is_string($deviceId) || $deviceId === '') {
+            return;
+        }
+
+        $this->devices->register(
+            $user,
+            $deviceId,
+            $request->validated('platform'),
+            $request->validated('fcm_token'),
+        );
     }
 }

@@ -9,6 +9,7 @@ use App\Models\Family;
 use App\Models\SubscriptionPayment;
 use App\Models\SubscriptionPlan;
 use App\Services\PlanFeatureService;
+use App\Services\SubscriptionCancelService;
 use App\Services\SubscriptionCheckoutService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -18,6 +19,7 @@ class SubscriptionController extends Controller
     public function __construct(
         private readonly PlanFeatureService $planFeatures,
         private readonly SubscriptionCheckoutService $checkoutService,
+        private readonly SubscriptionCancelService $cancelService,
     ) {}
 
     public function plans(): JsonResponse
@@ -75,6 +77,21 @@ class SubscriptionController extends Controller
         $result = $this->checkoutService->checkout($family, $request->user(), $validated);
 
         return response()->json(['data' => $result], 201);
+    }
+
+    public function cancel(Request $request): JsonResponse
+    {
+        $family = $this->resolveFamily($request);
+        if ($family === null) {
+            return response()->json(['message' => 'Familia no encontrada'], 404);
+        }
+
+        $result = $this->cancelService->cancel($family, $request->user());
+
+        return response()->json([
+            'message' => 'Suscripción cancelada. Volviste al plan gratuito.',
+            'data'    => $result,
+        ]);
     }
 
     public function payments(Request $request): JsonResponse

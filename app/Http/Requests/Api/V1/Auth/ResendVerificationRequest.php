@@ -16,7 +16,10 @@ class ResendVerificationRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'email' => ['required', 'string', 'email', 'max:255'],
+            'email'      => ['required', 'string', 'email', 'max:255'],
+            'device_id'  => ['nullable', 'string', 'max:255'],
+            'platform'   => ['nullable', 'string', 'max:32'],
+            'fcm_token'  => ['nullable', 'string', 'max:512'],
         ];
     }
 }

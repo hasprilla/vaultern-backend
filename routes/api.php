@@ -37,6 +37,8 @@ Route::prefix('v1/auth')->group(function () {
     Route::post('/login', [AuthController::class, 'login']);
     Route::post('/mfa/verify', [MfaController::class, 'verify']);
     Route::post('/account/reactivate', [ProfileController::class, 'reactivate']);
+    Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
+    Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 });
 
 Route::prefix('v1')->middleware(['api.auth', 'tenant'])->group(function () {
@@ -44,6 +46,9 @@ Route::prefix('v1')->middleware(['api.auth', 'tenant'])->group(function () {
     Route::get('/auth/me', [AuthController::class, 'me']);
     Route::post('/auth/refresh', [AuthController::class, 'refresh']);
 
+    Route::patch('/profile', [ProfileController::class, 'update']);
+    Route::post('/profile/password', [ProfileController::class, 'changePassword']);
+    Route::post('/profile/fcm-token', [ProfileController::class, 'updateFcmToken']);
     Route::get('/profile/notifications', [ProfileController::class, 'notificationPreferences']);
     Route::patch('/profile/notifications', [ProfileController::class, 'updateNotificationPreferences']);
     Route::post('/profile/account/deactivate', [ProfileController::class, 'deactivate']);
@@ -61,6 +66,7 @@ Route::prefix('v1')->middleware(['api.auth', 'tenant'])->group(function () {
     Route::patch('/tasks/{task}/complete', [TaskController::class, 'complete']);
     Route::patch('/tasks/{task}/assign', [TaskController::class, 'assign']);
 
+    Route::get('/ocr', [OcrController::class, 'index']);
     Route::post('/ocr/notebook', [OcrController::class, 'processNotebook']);
     Route::post('/ocr/document', [OcrController::class, 'processDocument']);
     Route::post('/ocr/invoice', [OcrController::class, 'processInvoice']);
@@ -69,6 +75,7 @@ Route::prefix('v1')->middleware(['api.auth', 'tenant'])->group(function () {
     Route::get('/transactions', [FinanceController::class, 'index']);
     Route::post('/transactions', [FinanceController::class, 'store']);
     Route::get('/transactions/{transaction}', [FinanceController::class, 'show']);
+    Route::delete('/transactions/{transaction}', [FinanceController::class, 'destroy']);
 
     Route::get('/budgets', [FinanceController::class, 'budgetsIndex']);
     Route::post('/budgets', [FinanceController::class, 'budgetsStore']);
@@ -97,10 +104,12 @@ Route::prefix('v1')->middleware(['api.auth', 'tenant'])->group(function () {
     Route::get('/subscriptions/payments', [SubscriptionController::class, 'payments']);
     Route::get('/subscriptions/payments/{payment}', [SubscriptionController::class, 'showPayment']);
     Route::post('/subscriptions/checkout', [SubscriptionController::class, 'checkout']);
+    Route::post('/subscriptions/cancel', [SubscriptionController::class, 'cancel']);
 
     Route::get('/school/lookup', [SchoolEnrollmentController::class, 'lookup']);
     Route::get('/school/enrollments', [SchoolEnrollmentController::class, 'index']);
     Route::post('/school/enrollments', [SchoolEnrollmentController::class, 'store']);
+    Route::delete('/school/enrollments/{enrollment}', [SchoolEnrollmentController::class, 'destroy']);
 
     Route::get('/school/teachers/schools', [SchoolBroadcastController::class, 'schools']);
     Route::get('/school/teachers/classes', [SchoolBroadcastController::class, 'classes']);

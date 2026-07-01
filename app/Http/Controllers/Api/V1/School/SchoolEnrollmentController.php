@@ -92,4 +92,21 @@ class SchoolEnrollmentController extends Controller
 
         return response()->json(['data' => $enrollments]);
     }
+
+    public function destroy(Request $request, string $enrollment): JsonResponse
+    {
+        if (! $request->user()->canManageTasks()) {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
+        $model = ClassEnrollment::query()->findOrFail($enrollment);
+
+        if ($model->family_id !== $request->user()->family_id) {
+            return response()->json(['message' => 'No autorizado'], 403);
+        }
+
+        $model->update(['status' => 'cancelled']);
+
+        return response()->json(['message' => 'Vinculación con el colegio cancelada.']);
+    }
 }
