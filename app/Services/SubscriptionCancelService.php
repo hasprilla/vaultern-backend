@@ -6,12 +6,16 @@ namespace App\Services;
 
 use App\Models\Family;
 use App\Models\User;
+use App\Support\SubscriptionPeriod;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class SubscriptionCancelService
 {
-    public function __construct(private readonly FamilyNotificationService $notifications) {}
+    public function __construct(
+        private readonly FamilyNotificationService $notifications,
+        private readonly SubscriptionBillingService $billing,
+    ) {}
 
     public function cancel(Family $family, User $user): array
     {
@@ -39,29 +43,26 @@ class SubscriptionCancelService
             $previousPlan = $subscription->plan_code;
             $periodEnd = $subscription->current_period_end ?? now();
 
-            $subscription->update([
-                'status'       => 'cancelled',
-                'cancelled_at' => now(),
-            ]);
+            $result = $this->billing->haltFutureCharges(
+                $family,
+                $user,
+                "Cancelación programada del plan {$previousPlan}. Acceso hasta ".SubscriptionPeriod::accessUntilDate($periodEnd),
+            );
 
             $this->notifications->notifyFamily(
                 $user,
                 'subscription_cancel',
                 'Cancelación programada',
-                "{$user->name} programó la cancelación del plan {$previousPlan}. Acceso hasta {$periodEnd->toDateString()}.",
+                "{$user->name} programó la cancelación del plan {$previousPlan}. Acceso hasta ".SubscriptionPeriod::accessUntilDate($periodEnd).'.',
                 ['entity_type' => 'subscription', 'entity_id' => $subscription->id],
             );
 
-            return [
-                'plan_code'           => $subscription->plan_code,
-                'previous_plan'       => $previousPlan,
-                'cancelled_at'        => now()->toIso8601String(),
-                'cancelled_by'        => $user->id,
-                'access_until'        => $periodEnd->toDateString(),
-                'current_period_end'  => $periodEnd->toIso8601String(),
-                'free_from'           => $subscription->fresh()->freeFromDate()?->toIso8601String(),
-                'pending_cancellation'=> true,
-            ];
+            return array_merge($result ?? [], [
+                'previous_plan'        => $previousPlan,
+                'cancelled_at'         => now()->toIso8601String(),
+                'cancelled_by'         => $user->id,
+                'pending_cancellation' => true,
+            ]);
         });
     }
 }

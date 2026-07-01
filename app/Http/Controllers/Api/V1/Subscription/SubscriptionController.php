@@ -64,14 +64,12 @@ class SubscriptionController extends Controller
                 'mode' => $subscription?->provider === 'simulated' ? 'simulated' : 'live',
                 'subscription' => $subscription,
                 'features' => $features,
-                'current_period_end' => $subscription?->current_period_end,
-                'cancelled_at' => $subscription?->cancelled_at,
+                'current_period_end' => $subscription?->accessUntilDate(),
+                'cancelled_at' => $subscription?->cancelled_at?->toDateString(),
                 'pending_cancellation' => $subscription?->isPendingCancellation() ?? false,
-                'access_until' => $subscription?->hasPaidAccess()
-                    ? $subscription?->current_period_end?->toDateString()
-                    : null,
-                'free_from' => $subscription?->freeFromDate()?->toIso8601String(),
-                'auto_renew' => ($subscription?->status === 'active' && $subscription?->cancelled_at === null) ?? false,
+                'access_until' => $subscription?->accessUntilDate(),
+                'free_from' => $subscription?->freeFromDate()?->toDateString(),
+                'auto_renew' => $subscription?->canAutoRenew() ?? false,
             ],
         ]);
     }
@@ -165,6 +163,6 @@ class SubscriptionController extends Controller
             return null;
         }
 
-        return Family::query()->with('subscription')->find($user->family_id);
+        return Family::query()->with(['subscription.renewalUser'])->find($user->family_id);
     }
 }

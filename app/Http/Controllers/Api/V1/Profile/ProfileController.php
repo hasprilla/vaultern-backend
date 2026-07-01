@@ -14,11 +14,13 @@ use App\Http\Requests\Api\V1\Profile\UpdateProfileRequest;
 use App\Models\Device;
 use App\Http\Resources\Api\V1\UserResource;
 use App\Infrastructure\Auth\TokenService;
+use App\Models\Family;
 use App\Models\FamilyMember;
 use App\Models\User;
 use App\Services\FamilyNotificationService;
 use App\Services\Mfa\TotpService;
 use App\Services\PlanFeatureService;
+use App\Services\SubscriptionBillingService;
 use App\Support\NotificationPreferences;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -31,6 +33,7 @@ class ProfileController extends Controller
         private readonly FamilyNotificationService $notifications,
         private readonly TotpService $totp,
         private readonly PlanFeatureService $planFeatures,
+        private readonly SubscriptionBillingService $subscriptionBilling,
     ) {}
 
     public function update(UpdateProfileRequest $request): JsonResponse
@@ -225,6 +228,8 @@ class ProfileController extends Controller
         }
 
         DB::transaction(function () use ($user) {
+            $this->haltFamilyBillingIfNeeded($user, 'Cuenta desactivada temporalmente');
+
             $user->update([
                 'account_status'  => 'deactivated',
                 'deactivated_at'  => now(),
@@ -299,6 +304,8 @@ class ProfileController extends Controller
         }
 
         DB::transaction(function () use ($user) {
+            $this->haltFamilyBillingIfNeeded($user, 'Cuenta eliminada permanentemente');
+
             $this->tokens->revoke($user);
 
             FamilyMember::query()
@@ -319,5 +326,20 @@ class ProfileController extends Controller
         return response()->json([
             'message' => 'Tu cuenta fue eliminada de forma permanente.',
         ]);
+    }
+
+    private function haltFamilyBillingIfNeeded(User $user, string $reason): void
+    {
+        if (! $this->subscriptionBilling->shouldHaltForUser($user)) {
+            return;
+        }
+
+        $family = Family::query()->with('subscription')->find($user->family_id);
+
+        if ($family === null) {
+            return;
+        }
+
+        $this->subscriptionBilling->haltFutureCharges($family, $user, $reason, notify: true);
     }
 }

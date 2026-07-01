@@ -9,6 +9,7 @@ use App\Models\Subscription;
 use App\Models\SubscriptionPayment;
 use App\Models\SubscriptionPaymentEvent;
 use App\Models\SubscriptionPlan;
+use App\Support\SubscriptionPeriod;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -128,7 +129,7 @@ class SubscriptionCheckoutService
                 ];
             }
 
-            $periodEnd = $billing === 'yearly' ? now()->addYear() : now()->addMonth();
+            $periodEnd = SubscriptionPeriod::periodEndFrom(now(), $billing);
 
             $subscription = Subscription::query()->updateOrCreate(
                 ['family_id' => $family->id],

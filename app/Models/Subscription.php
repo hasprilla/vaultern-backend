@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Support\SubscriptionPeriod;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -58,19 +59,48 @@ class Subscription extends Model
         return $this->status === 'cancelled' && $this->hasPaidAccess();
     }
 
+    public function canAutoRenew(): bool
+    {
+        if ($this->status !== 'active' || $this->cancelled_at !== null) {
+            return false;
+        }
+
+        if ($this->renewal_card_last4 === null) {
+            return false;
+        }
+
+        $renewalUser = $this->relationLoaded('renewalUser')
+            ? $this->renewalUser
+            : $this->renewalUser()->first();
+
+        if ($renewalUser === null || ! $renewalUser->isActive()) {
+            return false;
+        }
+
+        return true;
+    }
+
     public function freeFromDate(): ?\Illuminate\Support\Carbon
     {
         if ($this->current_period_end === null) {
             return null;
         }
 
-        return $this->current_period_end->copy()->addDay()->startOfDay();
+        return SubscriptionPeriod::freeFromAfter($this->current_period_end);
+    }
+
+    public function accessUntilDate(): ?string
+    {
+        if ($this->current_period_end === null) {
+            return null;
+        }
+
+        return SubscriptionPeriod::accessUntilDate($this->current_period_end);
     }
 
     public function isDueForRenewal(): bool
     {
-        return $this->status === 'active'
-            && $this->cancelled_at === null
+        return $this->canAutoRenew()
             && $this->current_period_end !== null
             && now()->toDateString() > $this->current_period_end->toDateString();
     }

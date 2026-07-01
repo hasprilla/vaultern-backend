@@ -9,6 +9,7 @@ use App\Models\SubscriptionPayment;
 use App\Models\SubscriptionPaymentEvent;
 use App\Models\SubscriptionPlan;
 use App\Models\User;
+use App\Support\SubscriptionPeriod;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -30,6 +31,7 @@ class SubscriptionRenewalService
         Subscription::query()
             ->where('status', 'active')
             ->whereNull('cancelled_at')
+            ->whereNotNull('renewal_card_last4')
             ->whereNotNull('current_period_end')
             ->whereDate('current_period_end', '<', now()->toDateString())
             ->with('family')
@@ -100,9 +102,10 @@ class SubscriptionRenewalService
 
         $reference = 'ZMF-'.strtoupper(Str::random(12));
         $previousPeriodEnd = $subscription->current_period_end;
-        $newPeriodEnd = $billing === 'yearly'
-            ? $previousPeriodEnd->copy()->addYear()
-            : $previousPeriodEnd->copy()->addMonth();
+        $newPeriodEnd = SubscriptionPeriod::periodEndFrom(
+            SubscriptionPeriod::freeFromAfter($previousPeriodEnd),
+            $billing,
+        );
 
         return DB::transaction(function () use (
             $subscription,
