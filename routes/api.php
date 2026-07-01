@@ -119,6 +119,7 @@ Route::prefix('v1')->middleware(['api.auth', 'tenant'])->group(function () {
     Route::post('/subscriptions/cancel', [SubscriptionController::class, 'cancel']);
 
     Route::get('/school/lookup', [SchoolEnrollmentController::class, 'lookup']);
+    Route::post('/school/register', [SchoolEnrollmentController::class, 'register']);
     Route::get('/school/enrollments', [SchoolEnrollmentController::class, 'index']);
     Route::post('/school/enrollments', [SchoolEnrollmentController::class, 'store']);
     Route::delete('/school/enrollments/{enrollment}', [SchoolEnrollmentController::class, 'destroy']);

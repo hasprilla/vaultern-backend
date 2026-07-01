@@ -132,4 +132,52 @@ class SchoolEnrollmentController extends Controller
 
         return response()->json(['message' => 'Vinculación con el colegio cancelada.']);
     }
+
+    public function register(Request $request): JsonResponse
+    {
+        if (! $request->user()->canManageTasks()) {
+            return response()->json(['message' => 'Solo padres, madres o tutores pueden registrar un colegio.'], 403);
+        }
+
+        $validated = $request->validate([
+            'name'       => ['required', 'string', 'min:3', 'max:120'],
+            'city'       => ['nullable', 'string', 'max:80'],
+            'class_name' => ['required', 'string', 'min:1', 'max:80'],
+        ]);
+
+        $school = School::query()->create([
+            'name'      => $validated['name'],
+            'city'      => $validated['city'] ?? null,
+            'plan'      => 'school',
+            'is_active' => true,
+        ]);
+
+        $class = SchoolClass::query()->create([
+            'school_id'   => $school->id,
+            'name'        => $validated['class_name'],
+            'school_year' => now()->format('Y').'-'.(now()->year + 1),
+        ]);
+
+        if ($request->user()->role === 'docente') {
+            $request->user()->teacherMemberships()->firstOrCreate(
+                ['school_id' => $school->id],
+                ['role' => 'teacher', 'status' => 'active'],
+            );
+        }
+
+        $school->load(['classes' => fn ($q) => $q->orderBy('name')]);
+
+        $this->notifications->notifyFamily(
+            $request->user(),
+            'school_registered',
+            'Colegio registrado',
+            "{$request->user()->name} registró el colegio {$school->name} (código {$school->code})",
+            ['entity_type' => 'school', 'entity_id' => $school->id],
+        );
+
+        return response()->json([
+            'message' => 'Colegio registrado. Comparte el código con otras familias.',
+            'data'    => $school,
+        ], 201);
+    }
 }
