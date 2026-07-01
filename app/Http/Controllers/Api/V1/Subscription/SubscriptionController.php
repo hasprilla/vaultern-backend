@@ -9,6 +9,7 @@ use App\Models\Family;
 use App\Models\SubscriptionPayment;
 use App\Models\SubscriptionPlan;
 use App\Services\PlanFeatureService;
+use App\Services\SubscriptionBillingService;
 use App\Services\SubscriptionCancelService;
 use App\Services\SubscriptionCheckoutService;
 use App\Services\SubscriptionRenewalService;
@@ -23,6 +24,7 @@ class SubscriptionController extends Controller
         private readonly SubscriptionCheckoutService $checkoutService,
         private readonly SubscriptionCancelService $cancelService,
         private readonly SubscriptionRenewalService $renewalService,
+        private readonly SubscriptionBillingService $billingService,
     ) {}
 
     public function plans(): JsonResponse
@@ -124,6 +126,21 @@ class SubscriptionController extends Controller
             'message' => 'Cancelación programada. Mantendrás tu plan hasta el '
                 .$result['access_until']
                 .'. El plan gratuito inicia al día siguiente.',
+            'data'    => $result,
+        ]);
+    }
+
+    public function resume(Request $request): JsonResponse
+    {
+        $family = $this->resolveFamily($request);
+        if ($family === null) {
+            return response()->json(['message' => 'Familia no encontrada'], 404);
+        }
+
+        $result = $this->billingService->resumeScheduledCancellation($family, $request->user());
+
+        return response()->json([
+            'message' => 'Cancelación revertida. Tu suscripción continúa activa y se renovará automáticamente.',
             'data'    => $result,
         ]);
     }

@@ -117,6 +117,7 @@ Route::prefix('v1')->middleware(['api.auth', 'tenant'])->group(function () {
     Route::get('/subscriptions/payments/{payment}', [SubscriptionController::class, 'showPayment']);
     Route::post('/subscriptions/checkout', [SubscriptionController::class, 'checkout']);
     Route::post('/subscriptions/cancel', [SubscriptionController::class, 'cancel']);
+    Route::post('/subscriptions/resume', [SubscriptionController::class, 'resume']);
 
     Route::get('/school/lookup', [SchoolEnrollmentController::class, 'lookup']);
     Route::post('/school/register', [SchoolEnrollmentController::class, 'register']);

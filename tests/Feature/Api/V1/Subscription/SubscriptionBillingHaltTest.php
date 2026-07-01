@@ -6,7 +6,9 @@ namespace Tests\Feature\Api\V1\Subscription;
 
 use App\Models\Family;
 use App\Models\Subscription;
+use App\Models\SubscriptionPayment;
 use App\Models\User;
+use App\Services\SubscriptionBillingService;
 use App\Services\SubscriptionRenewalService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
@@ -54,6 +56,46 @@ class SubscriptionBillingHaltTest extends TestCase
         $this->assertNull($subscription->renewal_card_last4);
         $this->assertNull($subscription->renewal_user_id);
         $this->assertFalse($subscription->canAutoRenew());
+    }
+
+    public function test_user_can_resume_scheduled_cancellation(): void
+    {
+        ['tokens' => $tokens, 'family' => $family, 'user' => $user] = $this->createUserWithFamily();
+
+        $subscription = $this->createActiveSubscription($family, $user);
+        SubscriptionPayment::query()->create([
+            'id' => (string) Str::uuid(),
+            'family_id' => $family->id,
+            'subscription_id' => $subscription->id,
+            'user_id' => $user->id,
+            'plan_code' => 'family_plus',
+            'billing' => 'monthly',
+            'amount_cents' => 499,
+            'currency' => 'EUR',
+            'status' => 'succeeded',
+            'provider' => 'simulated',
+            'payment_reference' => 'ZMF-TESTRESUME01',
+            'card_brand' => 'visa',
+            'card_last4' => '4242',
+            'card_holder_name' => 'MARIA GARCIA',
+            'paid_at' => now(),
+        ]);
+        app(SubscriptionBillingService::class)->haltFutureCharges(
+            $family->fresh(['subscription']),
+            $user,
+            'Cancelación programada',
+        );
+
+        $this->postJson('/api/v1/subscriptions/resume', [], $this->authHeaders($tokens))
+            ->assertOk()
+            ->assertJsonPath('data.pending_cancellation', false)
+            ->assertJsonPath('data.auto_renew', true);
+
+        $subscription->refresh();
+
+        $this->assertSame('active', $subscription->status);
+        $this->assertNull($subscription->cancelled_at);
+        $this->assertSame('4242', $subscription->renewal_card_last4);
     }
 
     private function createActiveSubscription(Family $family, User $user): Subscription
