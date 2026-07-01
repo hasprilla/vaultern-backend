@@ -94,6 +94,8 @@ Route::prefix('v1')->middleware(['api.auth', 'tenant'])->group(function () {
 
     Route::get('/subscriptions/plans', [SubscriptionController::class, 'plans']);
     Route::get('/subscriptions/current', [SubscriptionController::class, 'current']);
+    Route::get('/subscriptions/payments', [SubscriptionController::class, 'payments']);
+    Route::get('/subscriptions/payments/{payment}', [SubscriptionController::class, 'showPayment']);
     Route::post('/subscriptions/checkout', [SubscriptionController::class, 'checkout']);
 
     Route::get('/school/lookup', [SchoolEnrollmentController::class, 'lookup']);

@@ -6,16 +6,19 @@ namespace App\Http\Controllers\Api\V1\Subscription;
 
 use App\Http\Controllers\Controller;
 use App\Models\Family;
-use App\Models\Subscription;
+use App\Models\SubscriptionPayment;
 use App\Models\SubscriptionPlan;
 use App\Services\PlanFeatureService;
+use App\Services\SubscriptionCheckoutService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
 
 class SubscriptionController extends Controller
 {
-    public function __construct(private readonly PlanFeatureService $planFeatures) {}
+    public function __construct(
+        private readonly PlanFeatureService $planFeatures,
+        private readonly SubscriptionCheckoutService $checkoutService,
+    ) {}
 
     public function plans(): JsonResponse
     {
@@ -41,8 +44,12 @@ class SubscriptionController extends Controller
         return response()->json([
             'data' => [
                 'plan_code' => $family->activePlanCode(),
+                'billing' => $subscription?->billing,
+                'provider' => $subscription?->provider,
+                'mode' => $subscription?->provider === 'simulated' ? 'simulated' : 'live',
                 'subscription' => $subscription,
                 'features' => $features,
+                'current_period_end' => $subscription?->current_period_end,
             ],
         ]);
     }
@@ -56,43 +63,46 @@ class SubscriptionController extends Controller
 
         $validated = $request->validate([
             'plan_code' => ['required', 'string', 'in:family_plus,family_pro'],
-            'billing'   => ['nullable', 'string', 'in:monthly,yearly'],
+            'billing' => ['nullable', 'string', 'in:monthly,yearly'],
             'simulated' => ['nullable', 'boolean'],
+            'card_number' => ['required', 'string', 'min:13', 'max:23'],
+            'exp_month' => ['required', 'integer', 'min:1', 'max:12'],
+            'exp_year' => ['required', 'integer', 'min:'.(int) date('y'), 'max:'.((int) date('Y') + 20)],
+            'cvc' => ['required', 'string', 'min:3', 'max:4'],
+            'cardholder_name' => ['required', 'string', 'min:3', 'max:120'],
         ]);
 
-        $plan = SubscriptionPlan::query()
-            ->where('code', $validated['plan_code'])
-            ->where('is_active', true)
-            ->firstOrFail();
+        $result = $this->checkoutService->checkout($family, $request->user(), $validated);
 
-        $isSimulated = (bool) ($validated['simulated'] ?? true);
-        $periodEnd = ($validated['billing'] ?? 'monthly') === 'yearly'
-            ? now()->addYear()
-            : now()->addMonth();
+        return response()->json(['data' => $result], 201);
+    }
 
-        Subscription::query()->updateOrCreate(
-            ['family_id' => $family->id],
-            [
-                'id'                  => $family->subscription?->id ?? (string) Str::uuid(),
-                'plan_code'           => $plan->code,
-                'status'              => 'active',
-                'provider'            => $isSimulated ? 'simulated' : 'manual',
-                'current_period_end'  => $periodEnd,
-            ],
-        );
+    public function payments(Request $request): JsonResponse
+    {
+        $family = $this->resolveFamily($request);
+        if ($family === null) {
+            return response()->json(['message' => 'Familia no encontrada'], 404);
+        }
 
-        $family->update(['plan' => $plan->code]);
+        $payments = SubscriptionPayment::query()
+            ->with(['events' => fn ($q) => $q->orderBy('created_at')])
+            ->where('family_id', $family->id)
+            ->orderByDesc('created_at')
+            ->paginate(20);
 
-        return response()->json([
-            'data' => [
-                'message'      => $isSimulated
-                    ? 'Plan activado en modo simulado.'
-                    : 'Plan activado correctamente.',
-                'plan_code'    => $plan->code,
-                'mode'         => $isSimulated ? 'simulated' : 'live',
-                'checkout_url' => null,
-            ],
-        ]);
+        return response()->json($payments);
+    }
+
+    public function showPayment(Request $request, SubscriptionPayment $payment): JsonResponse
+    {
+        $family = $this->resolveFamily($request);
+        if ($family === null || $payment->family_id !== $family->id) {
+            return response()->json(['message' => 'No autorizado'], 403);
+        }
+
+        $payment->load(['events' => fn ($q) => $q->orderBy('created_at'), 'subscription']);
+
+        return response()->json(['data' => $payment]);
     }
 
     private function resolveFamily(Request $request): ?Family
