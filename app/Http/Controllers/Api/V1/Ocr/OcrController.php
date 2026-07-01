@@ -6,8 +6,11 @@ namespace App\Http\Controllers\Api\V1\Ocr;
 
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Concerns\ResolvesPagination;
+use App\Models\Family;
 use App\Models\OcrJob;
 use App\Services\FamilyNotificationService;
+use App\Services\Ocr\GoogleVisionOcrService;
+use App\Services\PlanFeatureService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -15,7 +18,11 @@ class OcrController extends Controller
 {
     use ResolvesPagination;
 
-    public function __construct(private readonly FamilyNotificationService $notifications) {}
+    public function __construct(
+        private readonly FamilyNotificationService $notifications,
+        private readonly PlanFeatureService $planFeatures,
+        private readonly GoogleVisionOcrService $vision,
+    ) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -30,6 +37,25 @@ class OcrController extends Controller
         }
 
         return response()->json($query->paginate($this->perPage($request)));
+    }
+
+    public function usage(Request $request): JsonResponse
+    {
+        $family = Family::query()->findOrFail($request->user()->family_id);
+        $limit = $this->planFeatures->familyFeatureLimit($family, 'ocr_scans_monthly', 5);
+        $used = OcrJob::query()
+            ->where('family_id', $family->id)
+            ->where('created_at', '>=', now()->startOfMonth())
+            ->count();
+
+        return response()->json([
+            'data' => [
+                'used'      => $used,
+                'limit'     => $limit,
+                'remaining' => max(0, $limit - $used),
+                'month'     => now()->format('Y-m'),
+            ],
+        ]);
     }
 
     public function processNotebook(Request $request): JsonResponse
@@ -56,6 +82,20 @@ class OcrController extends Controller
 
     private function process(Request $request, string $type): JsonResponse
     {
+        $family = Family::query()->findOrFail($request->user()->family_id);
+        $limit = $this->planFeatures->familyFeatureLimit($family, 'ocr_scans_monthly', 5);
+        $used = OcrJob::query()
+            ->where('family_id', $family->id)
+            ->where('created_at', '>=', now()->startOfMonth())
+            ->count();
+
+        if ($used >= $limit) {
+            return response()->json([
+                'message' => "Alcanzaste el límite de {$limit} escaneos OCR este mes. Mejora tu plan para continuar.",
+                'code'    => 'ocr_limit_reached',
+            ], 422);
+        }
+
         $request->validate([
             'file'      => ['nullable', 'file', 'mimes:jpeg,jpg,png,webp', 'max:10240'],
             'file_path' => ['nullable', 'string'],
@@ -71,7 +111,18 @@ class OcrController extends Controller
             $mimeType   = $uploaded->getClientMimeType();
         }
 
+        $rawText = $this->rawTextFor($type, $storedPath !== null);
+        $confidence = $storedPath !== null ? 0.85 : 0.75;
         $structured = $this->structuredDataFor($type);
+
+        if ($storedPath !== null && $this->vision->isConfigured()) {
+            $vision = $this->vision->extractText($storedPath);
+            if ($vision !== null) {
+                $rawText = $vision['text'];
+                $confidence = $vision['confidence'];
+                $structured = $this->vision->structure($type, $rawText);
+            }
+        }
 
         $job = OcrJob::query()->create([
             'family_id'       => $request->user()->family_id,
@@ -80,9 +131,9 @@ class OcrController extends Controller
             'status'          => 'done',
             'file_path'       => $storedPath,
             'mime_type'       => $mimeType,
-            'raw_text'        => ['text' => $this->rawTextFor($type, $storedPath !== null)],
+            'raw_text'        => ['text' => $rawText],
             'structured_data' => $structured,
-            'confidence'      => $storedPath !== null ? 0.92 : 0.85,
+            'confidence'      => $confidence,
         ]);
 
         $typeLabel = match ($type) {
@@ -105,7 +156,7 @@ class OcrController extends Controller
     private function rawTextFor(string $type, bool $hasFile): string
     {
         if (! $hasFile) {
-            return 'Escaneo simulado sin imagen adjunta.';
+            return 'Escaneo sin imagen adjunta.';
         }
 
         return match ($type) {
@@ -115,6 +166,7 @@ class OcrController extends Controller
         };
     }
 
+    /** @return array<string, mixed> */
     private function structuredDataFor(string $type): array
     {
         return match ($type) {
@@ -128,14 +180,12 @@ class OcrController extends Controller
                 'tasks' => [
                     ['title' => 'Matemáticas ej. 1-10', 'subject' => 'Matemáticas'],
                     ['title' => 'Leer capítulo 3', 'subject' => 'Español'],
-                    ['title' => 'Ejercicios de ciencias p. 45', 'subject' => 'Ciencias'],
                 ],
             ],
             default => [
                 'lines' => ['Documento digitalizado correctamente'],
                 'tasks' => [
                     ['title' => 'Revisar documento escaneado', 'subject' => 'General'],
-                    ['title' => 'Archivar copia digital', 'subject' => 'General'],
                 ],
             ],
         };

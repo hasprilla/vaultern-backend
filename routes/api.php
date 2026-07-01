@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\V1\Auth\AuthController;
 use App\Http\Controllers\Api\V1\Auth\MfaController;
 use App\Http\Controllers\Api\V1\Dashboard\DashboardController;
 use App\Http\Controllers\Api\V1\Family\FamilyController;
+use App\Http\Controllers\Api\V1\Family\ParentMessageController;
 use App\Http\Controllers\Api\V1\Finance\FinanceController;
 use App\Http\Controllers\Api\V1\Notification\NotificationController;
 use App\Http\Controllers\Api\V1\Ocr\OcrController;
@@ -49,6 +50,10 @@ Route::prefix('v1')->middleware(['api.auth', 'tenant'])->group(function () {
     Route::patch('/profile', [ProfileController::class, 'update']);
     Route::post('/profile/password', [ProfileController::class, 'changePassword']);
     Route::post('/profile/fcm-token', [ProfileController::class, 'updateFcmToken']);
+    Route::get('/profile/plan-usage', [ProfileController::class, 'planUsage']);
+    Route::post('/profile/mfa/setup', [ProfileController::class, 'setupMfa']);
+    Route::post('/profile/mfa/enable', [ProfileController::class, 'enableMfa']);
+    Route::post('/profile/mfa/disable', [ProfileController::class, 'disableMfa']);
     Route::get('/profile/notifications', [ProfileController::class, 'notificationPreferences']);
     Route::patch('/profile/notifications', [ProfileController::class, 'updateNotificationPreferences']);
     Route::post('/profile/account/deactivate', [ProfileController::class, 'deactivate']);
@@ -61,12 +66,16 @@ Route::prefix('v1')->middleware(['api.auth', 'tenant'])->group(function () {
     Route::post('/families/{family}/join-requests/{joinRequest}/approve', [FamilyController::class, 'approveJoinRequest']);
     Route::post('/families/{family}/join-requests/{joinRequest}/reject', [FamilyController::class, 'rejectJoinRequest']);
     Route::post('/families/{family}/members/{member}/role', [FamilyController::class, 'assignRole']);
+    Route::get('/families/{family}/messages', [ParentMessageController::class, 'index']);
+    Route::post('/families/{family}/messages', [ParentMessageController::class, 'store']);
+    Route::patch('/families/{family}/messages/{message}/read', [ParentMessageController::class, 'markRead']);
 
     Route::apiResource('tasks', TaskController::class);
     Route::patch('/tasks/{task}/complete', [TaskController::class, 'complete']);
     Route::patch('/tasks/{task}/assign', [TaskController::class, 'assign']);
 
     Route::get('/ocr', [OcrController::class, 'index']);
+    Route::get('/ocr/usage', [OcrController::class, 'usage']);
     Route::post('/ocr/notebook', [OcrController::class, 'processNotebook']);
     Route::post('/ocr/document', [OcrController::class, 'processDocument']);
     Route::post('/ocr/invoice', [OcrController::class, 'processInvoice']);
@@ -75,12 +84,15 @@ Route::prefix('v1')->middleware(['api.auth', 'tenant'])->group(function () {
     Route::get('/transactions', [FinanceController::class, 'index']);
     Route::post('/transactions', [FinanceController::class, 'store']);
     Route::get('/transactions/{transaction}', [FinanceController::class, 'show']);
+    Route::put('/transactions/{transaction}', [FinanceController::class, 'update']);
+    Route::patch('/transactions/{transaction}', [FinanceController::class, 'update']);
     Route::delete('/transactions/{transaction}', [FinanceController::class, 'destroy']);
 
     Route::get('/budgets', [FinanceController::class, 'budgetsIndex']);
     Route::post('/budgets', [FinanceController::class, 'budgetsStore']);
     Route::put('/budgets/{budget}', [FinanceController::class, 'budgetsUpdate']);
     Route::patch('/budgets/{budget}', [FinanceController::class, 'budgetsUpdate']);
+    Route::delete('/budgets/{budget}', [FinanceController::class, 'budgetsDestroy']);
 
     Route::get('/finance/reports/weekly', [FinanceController::class, 'weeklyReport']);
     Route::get('/finance/reports/monthly', [FinanceController::class, 'monthlyReport']);

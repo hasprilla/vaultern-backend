@@ -8,12 +8,16 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\Api\V1\SessionResource;
 use App\Infrastructure\Auth\TokenService;
 use App\Models\User;
+use App\Services\Mfa\TotpService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class MfaController extends Controller
 {
-    public function __construct(private readonly TokenService $tokens) {}
+    public function __construct(
+        private readonly TokenService $tokens,
+        private readonly TotpService $totp,
+    ) {}
 
     public function verify(Request $request): JsonResponse
     {
@@ -24,12 +28,11 @@ class MfaController extends Controller
 
         $user = User::query()->findOrFail($validated['user_id']);
 
-        if (! $user->mfa_enabled) {
+        if (! $user->mfa_enabled || $user->mfa_secret === null) {
             return response()->json(['message' => 'MFA not enabled for user'], 422);
         }
 
-        // Stub: accept code 000000 in development
-        if ($validated['code'] !== '000000') {
+        if (! $this->totp->verify($user->mfa_secret, $validated['code'])) {
             return response()->json(['message' => 'Invalid MFA code'], 401);
         }
 

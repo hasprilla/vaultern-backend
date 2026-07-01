@@ -17,6 +17,8 @@ use App\Infrastructure\Auth\TokenService;
 use App\Models\FamilyMember;
 use App\Models\User;
 use App\Services\FamilyNotificationService;
+use App\Services\Mfa\TotpService;
+use App\Services\PlanFeatureService;
 use App\Support\NotificationPreferences;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -27,6 +29,8 @@ class ProfileController extends Controller
     public function __construct(
         private readonly TokenService $tokens,
         private readonly FamilyNotificationService $notifications,
+        private readonly TotpService $totp,
+        private readonly PlanFeatureService $planFeatures,
     ) {}
 
     public function update(UpdateProfileRequest $request): JsonResponse
@@ -98,6 +102,89 @@ class ProfileController extends Controller
         }
 
         return response()->json(['message' => 'Token FCM actualizado.']);
+    }
+
+    public function planUsage(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if ($user->family_id === null) {
+            return response()->json(['data' => []]);
+        }
+
+        $family = \App\Models\Family::query()->findOrFail($user->family_id);
+        $features = $this->planFeatures->featuresForFamily($family);
+        $ocrLimit = $this->planFeatures->familyFeatureLimit($family, 'ocr_scans_monthly', 5);
+        $ocrUsed = \App\Models\OcrJob::query()
+            ->where('family_id', $family->id)
+            ->where('created_at', '>=', now()->startOfMonth())
+            ->count();
+        $childrenCount = User::query()
+            ->where('family_id', $family->id)
+            ->where('role', 'hijo')
+            ->count();
+
+        return response()->json([
+            'data' => [
+                'plan_code' => $family->activePlanCode(),
+                'features'  => $features,
+                'ocr'       => [
+                    'used'      => $ocrUsed,
+                    'limit'     => $ocrLimit,
+                    'remaining' => max(0, $ocrLimit - $ocrUsed),
+                ],
+                'children' => [
+                    'used'  => $childrenCount,
+                    'limit' => $this->planFeatures->familyFeatureLimit($family, 'max_children', 2),
+                ],
+            ],
+        ]);
+    }
+
+    public function setupMfa(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if ($user->mfa_enabled) {
+            return response()->json(['message' => 'MFA ya está activo.'], 422);
+        }
+
+        $secret = $this->totp->generateSecret();
+        $user->update(['mfa_secret' => $secret]);
+
+        return response()->json([
+            'data' => [
+                'secret'          => $secret,
+                'provisioning_uri'=> $this->totp->provisioningUri($secret, $user->email),
+            ],
+        ]);
+    }
+
+    public function enableMfa(Request $request): JsonResponse
+    {
+        $validated = $request->validate(['code' => ['required', 'string', 'size:6']]);
+        $user = $request->user();
+
+        if ($user->mfa_secret === null) {
+            return response()->json(['message' => 'Primero configura MFA con setup.'], 422);
+        }
+
+        if (! $this->totp->verify($user->mfa_secret, $validated['code'])) {
+            return response()->json(['message' => 'Código incorrecto.'], 422);
+        }
+
+        $user->update(['mfa_enabled' => true]);
+
+        return response()->json(['message' => 'Autenticación en dos pasos activada.']);
+    }
+
+    public function disableMfa(ConfirmPasswordRequest $request): JsonResponse
+    {
+        $user = $request->user();
+        $user->update([
+            'mfa_enabled' => false,
+            'mfa_secret'  => null,
+        ]);
+
+        return response()->json(['message' => 'Autenticación en dos pasos desactivada.']);
     }
 
     public function notificationPreferences(): JsonResponse

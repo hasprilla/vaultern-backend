@@ -8,6 +8,7 @@ use App\Domains\Finance\Entities\FinanceReportPeriod;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Concerns\ResolvesPagination;
 use App\Models\Budget;
+use App\Models\Family;
 use App\Models\Transaction;
 use App\Services\FamilyNotificationService;
 use Illuminate\Http\JsonResponse;
@@ -82,6 +83,38 @@ class FinanceController extends Controller
         );
 
         return response()->json(['data' => $transaction], 201);
+    }
+
+    public function update(Request $request, string $transaction): JsonResponse
+    {
+        if (! $request->user()->canManageFinances()) {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
+        $model = Transaction::query()->findOrFail($transaction);
+
+        $validated = $request->validate([
+            'amount'           => ['sometimes', 'numeric', 'min:0'],
+            'currency'         => ['sometimes', 'string', 'size:3'],
+            'type'             => ['sometimes', 'in:income,expense'],
+            'category'         => ['nullable', 'string', 'max:50'],
+            'description'      => ['nullable', 'string', 'max:255'],
+            'transaction_date' => ['sometimes', 'date'],
+            'child_id'         => ['nullable', 'integer', 'exists:users,id'],
+        ]);
+
+        $model->update($validated);
+        $model->load('child');
+
+        $this->notifications->notifyFamily(
+            $request->user(),
+            'finance_transaction',
+            'Transacción actualizada',
+            "{$request->user()->name} actualizó una transacción",
+            ['entity_type' => 'transaction', 'entity_id' => $model->id],
+        );
+
+        return response()->json(['data' => $model]);
     }
 
     public function show(Request $request, string $transaction): JsonResponse
@@ -183,6 +216,27 @@ class FinanceController extends Controller
         );
 
         return response()->json(['data' => $model->fresh()]);
+    }
+
+    public function budgetsDestroy(Request $request, string $budget): JsonResponse
+    {
+        if (! $request->user()->canManageFinances()) {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
+        $model = Budget::query()->findOrFail($budget);
+        $name = $model->name;
+        $model->delete();
+
+        $this->notifications->notifyFamily(
+            $request->user(),
+            'finance_budget',
+            'Presupuesto eliminado',
+            "{$request->user()->name} eliminó el presupuesto «{$name}»",
+            ['entity_type' => 'budget', 'entity_id' => $budget],
+        );
+
+        return response()->json(['message' => 'Presupuesto eliminado.']);
     }
 
     public function weeklyReport(Request $request): JsonResponse

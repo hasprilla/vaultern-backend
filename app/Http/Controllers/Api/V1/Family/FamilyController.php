@@ -11,6 +11,7 @@ use App\Http\Requests\Api\V1\Family\InviteMemberRequest;
 use App\Http\Requests\Api\V1\Family\RegisterChildRequest;
 use App\Http\Resources\Api\V1\UserResource;
 use App\Models\Family;
+use App\Models\Family;
 use App\Models\FamilyJoinRequest;
 use App\Models\FamilyMember;
 use App\Models\User;
@@ -25,6 +26,7 @@ class FamilyController extends Controller
     public function __construct(
         private readonly FamilyJoinRequestService $joinRequests,
         private readonly FamilyNotificationService $notifications,
+        private readonly \App\Services\PlanFeatureService $planFeatures,
     ) {}
     public function index(Request $request): JsonResponse
     {
@@ -158,6 +160,17 @@ class FamilyController extends Controller
 
         if (! $request->user()->familyRole()->canInviteMembers()) {
             return response()->json(['message' => 'Forbidden'], 403);
+        }
+
+        $familyModel = Family::query()->findOrFail($family);
+        $childrenCount = User::query()->where('family_id', $family)->where('role', 'hijo')->count();
+        $maxChildren = $this->planFeatures->familyFeatureLimit($familyModel, 'max_children', 2);
+
+        if ($childrenCount >= $maxChildren) {
+            return response()->json([
+                'message' => "Tu plan permite hasta {$maxChildren} hijos. Mejora tu plan para agregar más.",
+                'code'    => 'children_limit_reached',
+            ], 422);
         }
 
         $child = User::query()->create([

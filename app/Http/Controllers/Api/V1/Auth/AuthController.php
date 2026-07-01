@@ -251,6 +251,14 @@ class AuthController extends Controller
             );
         }
 
+        if ($user->mfa_enabled) {
+            return response()->json([
+                'message' => 'Ingresa el código de autenticación en dos pasos.',
+                'code'    => 'requires_mfa',
+                'data'    => ['user_id' => $user->id],
+            ], 403);
+        }
+
         $tokenData = $this->tokens->issue($user);
 
         return response()->json([
