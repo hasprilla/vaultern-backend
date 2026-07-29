@@ -6,7 +6,6 @@ namespace Database\Seeders;
 
 use App\Models\SubscriptionPlan;
 use Illuminate\Database\Seeder;
-use Illuminate\Support\Str;
 
 class SubscriptionPlanSeeder extends Seeder
 {
@@ -36,6 +35,7 @@ class SubscriptionPlanSeeder extends Seeder
                     'max_children' => 99,
                     'ocr_scans_monthly' => 999,
                     'ads' => false,
+                    'reports' => true,
                     'school_broadcast' => false,
                 ],
             ],
@@ -68,10 +68,9 @@ class SubscriptionPlanSeeder extends Seeder
         ];
 
         foreach ($plans as $plan) {
-            SubscriptionPlan::query()->firstOrCreate(
+            SubscriptionPlan::query()->updateOrCreate(
                 ['code' => $plan['code']],
                 array_merge($plan, [
-                    'id' => (string) Str::uuid(),
                     'currency' => 'EUR',
                     'is_active' => true,
                 ]),

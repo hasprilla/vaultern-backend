@@ -38,6 +38,13 @@ class TaskController extends Controller
                                     ->whereDate('due_date', '<', now());
                             });
                     });
+            } elseif ($status === 'pending') {
+                // Pendientes reales: status pending y sin fecha vencida.
+                $query->where('status', 'pending')
+                    ->where(function ($builder) {
+                        $builder->whereNull('due_date')
+                            ->orWhereDate('due_date', '>=', now()->toDateString());
+                    });
             } else {
                 $query->where('status', $status);
             }

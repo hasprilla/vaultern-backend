@@ -102,4 +102,32 @@ class TaskApiTest extends TestCase
 
         $this->assertGreaterThanOrEqual(2, count($response->json('data')));
     }
+
+    public function test_pending_filter_excludes_overdue_by_due_date(): void
+    {
+        ['tokens' => $tokens] = $this->createUserWithFamily();
+
+        $this->postJson('/api/v1/tasks', [
+            'title'    => 'Pendiente vencida',
+            'due_date' => now()->subDay()->toDateString(),
+        ], $this->authHeaders($tokens))->assertCreated();
+
+        $this->postJson('/api/v1/tasks', [
+            'title'    => 'Pendiente al día',
+            'due_date' => now()->addDay()->toDateString(),
+        ], $this->authHeaders($tokens))->assertCreated();
+
+        $this->postJson('/api/v1/tasks', [
+            'title' => 'Pendiente sin fecha',
+        ], $this->authHeaders($tokens))->assertCreated();
+
+        $response = $this->getJson('/api/v1/tasks?status=pending', $this->authHeaders($tokens))
+            ->assertOk();
+
+        $titles = collect($response->json('data'))->pluck('title')->all();
+
+        $this->assertContains('Pendiente al día', $titles);
+        $this->assertContains('Pendiente sin fecha', $titles);
+        $this->assertNotContains('Pendiente vencida', $titles);
+    }
 }
