@@ -15,8 +15,14 @@ up:
 
 up-realtime:
 	@test -f .env.docker || cp docker/.env.docker.example .env.docker
+	@grep -q '^BROADCAST_CONNECTION=' .env.docker 2>/dev/null && \
+	  sed -i.bak 's/^BROADCAST_CONNECTION=.*/BROADCAST_CONNECTION=reverb/' .env.docker && rm -f .env.docker.bak || \
+	  echo 'BROADCAST_CONNECTION=reverb' >> .env.docker
 	BROADCAST_CONNECTION=reverb $(COMPOSE) --profile realtime up --build -d
-	@echo "Reverb ws://127.0.0.1:8080"
+	@echo ""
+	@echo "API:    http://127.0.0.1:8000/api/v1/health"
+	@echo "Reverb: ws://127.0.0.1:8080"
+	@echo "Flutter: cd ../zumifly-flutter && ./scripts/run-local-docker.sh"
 
 down:
 	$(COMPOSE) down

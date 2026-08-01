@@ -11,6 +11,7 @@ use App\Models\OcrJob;
 use App\Services\FamilyNotificationService;
 use App\Services\Ocr\GoogleVisionOcrService;
 use App\Services\PlanFeatureService;
+use App\Support\FamilyRealtime;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -148,6 +149,15 @@ class OcrController extends Controller
             'Documento escaneado',
             "{$request->user()->name} digitalizó un $typeLabel con OCR",
             ['entity_type' => 'ocr_job', 'entity_id' => $job->id],
+        );
+
+        FamilyRealtime::ocrJobUpdated(
+            familyId: (string) $request->user()->family_id,
+            userId: (int) $request->user()->id,
+            jobId: (string) $job->id,
+            status: (string) $job->status,
+            ocrType: $type,
+            action: 'completed',
         );
 
         return response()->json(['data' => $job], 202);

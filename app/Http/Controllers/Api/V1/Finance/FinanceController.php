@@ -7,12 +7,14 @@ namespace App\Http\Controllers\Api\V1\Finance;
 use App\Domains\Finance\Entities\FinanceReportPeriod;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Concerns\ResolvesPagination;
+use App\Http\Controllers\Concerns\ReturnsForbidden;
 use App\Http\Controllers\Concerns\ScopesByChildGuardianship;
 use App\Models\Budget;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\ChildGuardianService;
 use App\Services\FamilyNotificationService;
+use App\Support\FamilyRealtime;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -20,6 +22,7 @@ use Illuminate\Support\Str;
 class FinanceController extends Controller
 {
     use ResolvesPagination;
+    use ReturnsForbidden;
     use ScopesByChildGuardianship;
 
     public function __construct(
@@ -29,8 +32,8 @@ class FinanceController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        if (! $request->user()->canManageFinances()) {
-            return response()->json(['message' => 'Forbidden'], 403);
+        if ($forbidden = $this->forbidUnlessAuthorized('viewAny', Transaction::class)) {
+            return $forbidden;
         }
 
         $query = $this->transactionsForGuardian($request->user(), $this->guardians)
@@ -50,8 +53,8 @@ class FinanceController extends Controller
 
     public function store(Request $request): JsonResponse
     {
-        if (! $request->user()->canManageFinances()) {
-            return response()->json(['message' => 'Forbidden'], 403);
+        if ($forbidden = $this->forbidUnlessAuthorized('create', Transaction::class)) {
+            return $forbidden;
         }
 
         $validated = $request->validate([
@@ -92,16 +95,25 @@ class FinanceController extends Controller
             ['entity_type' => 'transaction', 'entity_id' => $transaction->id],
         );
 
+        FamilyRealtime::financeChanged(
+            familyId: (string) $request->user()->family_id,
+            entityType: 'transaction',
+            entityId: (string) $transaction->id,
+            action: 'created',
+            actorId: (int) $request->user()->id,
+            childId: (int) $child->id,
+        );
+
         return response()->json(['data' => $transaction], 201);
     }
 
     public function update(Request $request, string $transaction): JsonResponse
     {
-        if (! $request->user()->canManageFinances()) {
-            return response()->json(['message' => 'Forbidden'], 403);
-        }
-
         $model = $this->transactionsForGuardian($request->user(), $this->guardians)->findOrFail($transaction);
+
+        if ($forbidden = $this->forbidUnlessAuthorized('update', $model)) {
+            return $forbidden;
+        }
 
         $validated = $request->validate([
             'amount'           => ['sometimes', 'numeric', 'min:0'],
@@ -131,29 +143,38 @@ class FinanceController extends Controller
             );
         }
 
+        FamilyRealtime::financeChanged(
+            familyId: (string) $request->user()->family_id,
+            entityType: 'transaction',
+            entityId: (string) $model->id,
+            action: 'updated',
+            actorId: (int) $request->user()->id,
+            childId: $model->child_id !== null ? (int) $model->child_id : null,
+        );
+
         return response()->json(['data' => $model]);
     }
 
     public function show(Request $request, string $transaction): JsonResponse
     {
-        if (! $request->user()->canManageFinances()) {
-            return response()->json(['message' => 'Forbidden'], 403);
+        $model = $this->transactionsForGuardian($request->user(), $this->guardians)->findOrFail($transaction);
+
+        if ($forbidden = $this->forbidUnlessAuthorized('view', $model)) {
+            return $forbidden;
         }
 
-        return response()->json([
-            'data' => $this->transactionsForGuardian($request->user(), $this->guardians)->findOrFail($transaction),
-        ]);
+        return response()->json(['data' => $model]);
     }
 
     public function destroy(Request $request, string $transaction): JsonResponse
     {
-        if (! $request->user()->canManageFinances()) {
-            return response()->json(['message' => 'Forbidden'], 403);
-        }
-
         $model = $this->transactionsForGuardian($request->user(), $this->guardians)
             ->with('child')
             ->findOrFail($transaction);
+
+        if ($forbidden = $this->forbidUnlessAuthorized('delete', $model)) {
+            return $forbidden;
+        }
         $description = $model->description ?? 'Transacción';
         $childId = $model->child_id !== null ? (int) $model->child_id : null;
         $childName = $model->child?->name;
@@ -170,13 +191,22 @@ class FinanceController extends Controller
             );
         }
 
+        FamilyRealtime::financeChanged(
+            familyId: (string) $request->user()->family_id,
+            entityType: 'transaction',
+            entityId: (string) $transaction,
+            action: 'deleted',
+            actorId: (int) $request->user()->id,
+            childId: $childId,
+        );
+
         return response()->json(['message' => 'Transacción eliminada.']);
     }
 
     public function budgetsIndex(Request $request): JsonResponse
     {
-        if (! $request->user()->canManageFinances()) {
-            return response()->json(['message' => 'Forbidden'], 403);
+        if ($forbidden = $this->forbidUnlessAuthorized('viewAny', Budget::class)) {
+            return $forbidden;
         }
 
         return response()->json(['data' => Budget::query()->get()]);
@@ -184,8 +214,8 @@ class FinanceController extends Controller
 
     public function budgetsStore(Request $request): JsonResponse
     {
-        if (! $request->user()->canManageFinances()) {
-            return response()->json(['message' => 'Forbidden'], 403);
+        if ($forbidden = $this->forbidUnlessAuthorized('create', Budget::class)) {
+            return $forbidden;
         }
 
         $validated = $request->validate([
@@ -213,16 +243,24 @@ class FinanceController extends Controller
             ['entity_type' => 'budget', 'entity_id' => $budget->id],
         );
 
+        FamilyRealtime::financeChanged(
+            familyId: (string) $request->user()->family_id,
+            entityType: 'budget',
+            entityId: (string) $budget->id,
+            action: 'created',
+            actorId: (int) $request->user()->id,
+        );
+
         return response()->json(['data' => $budget], 201);
     }
 
     public function budgetsUpdate(Request $request, string $budget): JsonResponse
     {
-        if (! $request->user()->canManageFinances()) {
-            return response()->json(['message' => 'Forbidden'], 403);
-        }
-
         $model = Budget::query()->findOrFail($budget);
+
+        if ($forbidden = $this->forbidUnlessAuthorized('update', $model)) {
+            return $forbidden;
+        }
 
         $validated = $request->validate([
             'name'   => ['sometimes', 'string', 'max:120'],
@@ -239,16 +277,25 @@ class FinanceController extends Controller
             ['entity_type' => 'budget', 'entity_id' => $model->id],
         );
 
+        FamilyRealtime::financeChanged(
+            familyId: (string) $request->user()->family_id,
+            entityType: 'budget',
+            entityId: (string) $model->id,
+            action: 'updated',
+            actorId: (int) $request->user()->id,
+        );
+
         return response()->json(['data' => $model->fresh()]);
     }
 
     public function budgetsDestroy(Request $request, string $budget): JsonResponse
     {
-        if (! $request->user()->canManageFinances()) {
-            return response()->json(['message' => 'Forbidden'], 403);
+        $model = Budget::query()->findOrFail($budget);
+
+        if ($forbidden = $this->forbidUnlessAuthorized('delete', $model)) {
+            return $forbidden;
         }
 
-        $model = Budget::query()->findOrFail($budget);
         $name = $model->name;
         $model->delete();
 
@@ -258,6 +305,14 @@ class FinanceController extends Controller
             'Presupuesto eliminado',
             "{$request->user()->name} eliminó el presupuesto «{$name}»",
             ['entity_type' => 'budget', 'entity_id' => $budget],
+        );
+
+        FamilyRealtime::financeChanged(
+            familyId: (string) $request->user()->family_id,
+            entityType: 'budget',
+            entityId: (string) $budget,
+            action: 'deleted',
+            actorId: (int) $request->user()->id,
         );
 
         return response()->json(['message' => 'Presupuesto eliminado.']);
@@ -285,8 +340,8 @@ class FinanceController extends Controller
 
     private function report(Request $request, FinanceReportPeriod $period): JsonResponse
     {
-        if (! $request->user()->canManageFinances()) {
-            return response()->json(['message' => 'Forbidden'], 403);
+        if ($forbidden = $this->forbidUnlessAuthorized('viewAny', Transaction::class)) {
+            return $forbidden;
         }
 
         $from = now()->subDays($period->days())->startOfDay();

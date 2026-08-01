@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace App\Jobs;
 
-use App\Events\TaskChanged;
 use App\Models\ClassEnrollment;
 use App\Models\SchoolTaskBroadcast;
 use App\Models\Task;
 use App\Services\FamilyNotificationService;
+use App\Support\FamilyRealtime;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Str;
@@ -85,7 +85,7 @@ class DispatchSchoolTaskBroadcastJob implements ShouldQueue
             );
 
             // En cPanel (broadcast=log) no hay WS; FCM + soft refresh cubren sync.
-            event(new TaskChanged(
+            FamilyRealtime::taskChanged(
                 familyId: (string) $enrollment->family_id,
                 taskId: (string) $task->id,
                 action: 'created',
@@ -93,7 +93,7 @@ class DispatchSchoolTaskBroadcastJob implements ShouldQueue
                 title: $task->title,
                 assigneeId: (int) $student->id,
                 actorId: (int) $teacher->id,
-            ));
+            );
 
             $created++;
             if ($created % 25 === 0) {

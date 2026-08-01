@@ -4,12 +4,13 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1\Task;
 
-use App\Events\TaskChanged;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Concerns\ResolvesPagination;
+use App\Http\Controllers\Concerns\ReturnsForbidden;
 use App\Models\Task;
 use App\Models\User;
 use App\Services\FamilyNotificationService;
+use App\Support\FamilyRealtime;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -17,6 +18,7 @@ use Illuminate\Support\Str;
 class TaskController extends Controller
 {
     use ResolvesPagination;
+    use ReturnsForbidden;
 
     public function __construct(private readonly FamilyNotificationService $notifications) {}
 
@@ -63,8 +65,8 @@ class TaskController extends Controller
 
     public function store(Request $request): JsonResponse
     {
-        if (! $request->user()->canManageTasks()) {
-            return response()->json(['message' => 'Forbidden'], 403);
+        if ($forbidden = $this->forbidUnlessAuthorized('create', Task::class)) {
+            return $forbidden;
         }
 
         $validated = $request->validate([
@@ -105,7 +107,7 @@ class TaskController extends Controller
             $body,
         );
 
-        event(new TaskChanged(
+        FamilyRealtime::taskChanged(
             familyId: (string) $request->user()->family_id,
             taskId: (string) $task->id,
             action: 'created',
@@ -113,7 +115,7 @@ class TaskController extends Controller
             title: $task->title,
             assigneeId: $task->assigned_to !== null ? (int) $task->assigned_to : null,
             actorId: (int) $request->user()->id,
-        ));
+        );
 
         return response()->json(['data' => $task], 201);
     }
@@ -122,16 +124,20 @@ class TaskController extends Controller
     {
         $model = Task::query()->with(['creator', 'assignee'])->findOrFail($task);
 
+        if ($forbidden = $this->forbidUnlessAuthorized('view', $model)) {
+            return $forbidden;
+        }
+
         return response()->json(['data' => $model]);
     }
 
     public function update(Request $request, string $task): JsonResponse
     {
-        if (! $request->user()->canManageTasks()) {
-            return response()->json(['message' => 'Forbidden'], 403);
-        }
-
         $model = Task::query()->findOrFail($task);
+
+        if ($forbidden = $this->forbidUnlessAuthorized('update', $model)) {
+            return $forbidden;
+        }
 
         $validated = $request->validate([
             'title'       => ['sometimes', 'string', 'max:255'],
@@ -152,7 +158,7 @@ class TaskController extends Controller
             "{$request->user()->name} actualizó «{$model->title}»",
         );
 
-        event(new TaskChanged(
+        FamilyRealtime::taskChanged(
             familyId: (string) $request->user()->family_id,
             taskId: (string) $model->id,
             action: 'updated',
@@ -160,18 +166,18 @@ class TaskController extends Controller
             title: $model->title,
             assigneeId: $model->assigned_to !== null ? (int) $model->assigned_to : null,
             actorId: (int) $request->user()->id,
-        ));
+        );
 
         return response()->json(['data' => $model]);
     }
 
     public function destroy(Request $request, string $task): JsonResponse
     {
-        if (! $request->user()->canManageTasks()) {
-            return response()->json(['message' => 'Forbidden'], 403);
-        }
-
         $model = Task::query()->with('assignee')->findOrFail($task);
+
+        if ($forbidden = $this->forbidUnlessAuthorized('delete', $model)) {
+            return $forbidden;
+        }
         $title = $model->title;
 
         $this->notifyTaskAudience(
@@ -184,7 +190,7 @@ class TaskController extends Controller
 
         $model->delete();
 
-        event(new TaskChanged(
+        FamilyRealtime::taskChanged(
             familyId: (string) $request->user()->family_id,
             taskId: (string) $task,
             action: 'deleted',
@@ -192,7 +198,7 @@ class TaskController extends Controller
             title: $title,
             assigneeId: null,
             actorId: (int) $request->user()->id,
-        ));
+        );
 
         return response()->json(['message' => 'Task deleted']);
     }
@@ -200,6 +206,10 @@ class TaskController extends Controller
     public function complete(Request $request, string $task): JsonResponse
     {
         $model = Task::query()->findOrFail($task);
+
+        if ($forbidden = $this->forbidUnlessAuthorized('complete', $model)) {
+            return $forbidden;
+        }
 
         $model->update([
             'status'       => 'done',
@@ -216,7 +226,7 @@ class TaskController extends Controller
             "{$request->user()->name} completó «{$model->title}»",
         );
 
-        event(new TaskChanged(
+        FamilyRealtime::taskChanged(
             familyId: (string) $request->user()->family_id,
             taskId: (string) $model->id,
             action: 'completed',
@@ -224,22 +234,23 @@ class TaskController extends Controller
             title: $model->title,
             assigneeId: $model->assigned_to !== null ? (int) $model->assigned_to : null,
             actorId: (int) $request->user()->id,
-        ));
+        );
 
         return response()->json(['data' => $model]);
     }
 
     public function assign(Request $request, string $task): JsonResponse
     {
-        if (! $request->user()->canManageTasks()) {
-            return response()->json(['message' => 'Forbidden'], 403);
+        $model = Task::query()->findOrFail($task);
+
+        if ($forbidden = $this->forbidUnlessAuthorized('assign', $model)) {
+            return $forbidden;
         }
 
         $validated = $request->validate([
             'assigned_to' => ['required', 'integer', 'exists:users,id'],
         ]);
 
-        $model = Task::query()->findOrFail($task);
         $model->update(['assigned_to' => $validated['assigned_to']]);
         $model = $model->fresh(['assignee']);
 
@@ -251,7 +262,7 @@ class TaskController extends Controller
             "{$request->user()->name} asignó «{$model->title}» a {$model->assignee?->name}",
         );
 
-        event(new TaskChanged(
+        FamilyRealtime::taskChanged(
             familyId: (string) $request->user()->family_id,
             taskId: (string) $model->id,
             action: 'assigned',
@@ -259,7 +270,7 @@ class TaskController extends Controller
             title: $model->title,
             assigneeId: $model->assigned_to !== null ? (int) $model->assigned_to : null,
             actorId: (int) $request->user()->id,
-        ));
+        );
 
         return response()->json(['data' => $model]);
     }

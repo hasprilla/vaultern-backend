@@ -9,7 +9,8 @@ Stack objetivo (sin reescribir Laravel):
 | **scheduler** | `scheduler` | `schedule:work` (suscripciones, etc.) |
 | Plugins | MySQL + Redis | datos + cola/cache/sesión |
 
-Realtime WS (Reverb) es **opcional**. MVP: `BROADCAST_CONNECTION=log` + FCM (igual que el diseño cPanel).
+Realtime WS (Reverb) es **opcional**. MVP: `BROADCAST_CONNECTION=log` + FCM (igual que el diseño cPanel).  
+Para activar Reverb en VPS/Railway: ver [VPS_REALTIME.md](./VPS_REALTIME.md).
 
 ---
 
