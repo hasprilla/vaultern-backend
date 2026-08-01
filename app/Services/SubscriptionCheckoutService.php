@@ -9,8 +9,9 @@ use App\Models\Subscription;
 use App\Models\SubscriptionPayment;
 use App\Models\SubscriptionPaymentEvent;
 use App\Models\SubscriptionPlan;
-use App\Support\SubscriptionPeriod;
 use App\Models\User;
+use App\Support\SubscriptionPeriod;
+use App\Support\SubscriptionPlanCatalog;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -23,40 +24,49 @@ class SubscriptionCheckoutService
     ) {}
 
     /**
+     * Checkout simulado (tarjeta). Deshabilitado si Mercado Pago está activo.
+     *
      * @param  array<string, mixed>  $input
      * @return array<string, mixed>
      */
     public function checkout(Family $family, User $user, array $input): array
     {
-        $plan = SubscriptionPlan::query()
-            ->where('code', $input['plan_code'])
-            ->where('is_active', true)
-            ->first();
-
-        if ($plan === null) {
+        if (config('mercadopago.enabled')) {
             throw ValidationException::withMessages([
-                'plan_code' => 'Plan no disponible. Contacta soporte o intenta más tarde.',
+                'mercadopago' => 'Usa el checkout de Mercado Pago (POST /subscriptions/checkout/mp).',
             ]);
         }
 
-        $billing = $input['billing'] ?? 'monthly';
-        $isSimulated = (bool) ($input['simulated'] ?? true);
-        $amountCents = $billing === 'yearly'
-            ? ($plan->price_yearly_cents ?? $plan->price_monthly_cents * 12)
-            : $plan->price_monthly_cents;
+        SubscriptionPlanCatalog::ensureSeeded();
 
+        $planCode = (string) ($input['plan_code'] ?? '');
+        $billing = ($input['billing'] ?? 'monthly') === 'yearly' ? 'yearly' : 'monthly';
+        $isSimulated = (bool) ($input['simulated'] ?? true);
         $reference = 'ZMF-'.strtoupper(Str::random(12));
 
-        return DB::transaction(function () use ($family, $user, $plan, $billing, $isSimulated, $amountCents, $reference, $input) {
+        $plan = SubscriptionPlan::query()
+            ->where('code', $planCode)
+            ->where('is_active', true)
+            ->where('code', '!=', 'free')
+            ->first();
+
+        $amountCents = 0;
+        if ($plan !== null) {
+            $amountCents = $billing === 'yearly'
+                ? ($plan->price_yearly_cents ?? $plan->price_monthly_cents * 12)
+                : $plan->price_monthly_cents;
+        }
+
+        return DB::transaction(function () use ($family, $user, $plan, $planCode, $billing, $isSimulated, $amountCents, $reference, $input) {
             $payment = SubscriptionPayment::query()->create([
                 'id' => (string) Str::uuid(),
                 'family_id' => $family->id,
                 'subscription_id' => $family->subscription?->id,
                 'user_id' => $user->id,
-                'plan_code' => $plan->code,
+                'plan_code' => $planCode !== '' ? $planCode : 'unknown',
                 'billing' => $billing,
                 'amount_cents' => $amountCents,
-                'currency' => $plan->currency,
+                'currency' => $plan?->currency ?? 'COP',
                 'status' => 'pending',
                 'provider' => $isSimulated ? 'simulated' : 'manual',
                 'payment_reference' => $reference,
@@ -64,12 +74,18 @@ class SubscriptionCheckoutService
             ]);
 
             $this->logEvent($payment, $user, 'payment_initiated', 'Pago iniciado', [
-                'plan_code' => $plan->code,
+                'plan_code' => $planCode,
                 'billing' => $billing,
                 'amount_cents' => $amountCents,
             ]);
 
             try {
+                if ($plan === null) {
+                    throw ValidationException::withMessages([
+                        'plan_code' => 'Plan no disponible. Contacta soporte o intenta más tarde.',
+                    ]);
+                }
+
                 $cardMeta = $this->cardPayments->validate([
                     'card_number' => $input['card_number'] ?? '',
                     'exp_month' => $input['exp_month'] ?? 0,
@@ -90,15 +106,6 @@ class SubscriptionCheckoutService
                 ]);
 
                 $this->cardPayments->simulateCharge($cardMeta['last4']);
-
-                $payment->update([
-                    'status' => 'succeeded',
-                    'paid_at' => now(),
-                ]);
-
-                $this->logEvent($payment, $user, 'payment_succeeded', 'Pago simulado exitoso', [
-                    'payment_reference' => $reference,
-                ]);
             } catch (ValidationException $e) {
                 $reason = collect($e->errors())->flatten()->first() ?? 'Pago rechazado';
                 $payment->update([
@@ -120,7 +127,7 @@ class SubscriptionCheckoutService
                 return [
                     'success' => false,
                     'message' => $reason,
-                    'plan_code' => $plan->code,
+                    'plan_code' => $planCode,
                     'billing' => $billing,
                     'mode' => $isSimulated ? 'simulated' : 'live',
                     'payment' => $payment->fresh(['events']),
@@ -129,40 +136,18 @@ class SubscriptionCheckoutService
                 ];
             }
 
-            $periodEnd = SubscriptionPeriod::periodEndFrom(now(), $billing);
-
-            $subscription = Subscription::query()->updateOrCreate(
-                ['family_id' => $family->id],
-                [
-                    'id' => $family->subscription?->id ?? (string) Str::uuid(),
-                    'plan_code' => $plan->code,
-                    'billing' => $billing,
-                    'status' => 'active',
-                    'provider' => $isSimulated ? 'simulated' : 'manual',
-                    'current_period_end' => $periodEnd,
-                    'cancelled_at' => null,
-                    'renewal_card_last4' => $cardMeta['last4'],
-                    'renewal_card_brand' => $cardMeta['brand'],
-                    'renewal_card_holder_name' => $cardMeta['holder'],
-                    'renewal_user_id' => $user->id,
-                ],
-            );
-
-            $payment->update(['subscription_id' => $subscription->id]);
-            $family->update(['plan' => $plan->code]);
-
-            $this->logEvent($payment, $user, 'subscription_activated', 'Suscripción activada', [
-                'subscription_id' => $subscription->id,
-                'plan_code' => $plan->code,
-                'current_period_end' => $periodEnd->toIso8601String(),
-            ]);
-
-            $this->notifications->notifyFamily(
+            $subscription = $this->activateFromSuccessfulPayment(
+                $family,
                 $user,
-                'subscription_checkout',
-                'Plan activado',
-                "{$user->name} activó el plan {$plan->code}",
-                ['entity_type' => 'subscription', 'entity_id' => $subscription->id],
+                $payment,
+                $plan,
+                $billing,
+                $isSimulated ? 'simulated' : 'manual',
+                [
+                    'last4' => $cardMeta['last4'],
+                    'brand' => $cardMeta['brand'],
+                    'holder' => $cardMeta['holder'],
+                ],
             );
 
             return [
@@ -178,6 +163,70 @@ class SubscriptionCheckoutService
                 'checkout_url' => null,
             ];
         });
+    }
+
+    /**
+     * Activa suscripción tras pago exitoso (simulado o Mercado Pago).
+     *
+     * @param  array{last4?: string, brand?: string, holder?: string}|null  $renewalCard
+     */
+    public function activateFromSuccessfulPayment(
+        Family $family,
+        User $user,
+        SubscriptionPayment $payment,
+        SubscriptionPlan $plan,
+        string $billing,
+        string $provider,
+        ?array $renewalCard = null,
+    ): Subscription {
+        $periodEnd = SubscriptionPeriod::periodEndFrom(now(), $billing);
+
+        $subscription = Subscription::query()->updateOrCreate(
+            ['family_id' => $family->id],
+            [
+                'id' => $family->subscription?->id ?? (string) Str::uuid(),
+                'plan_code' => $plan->code,
+                'billing' => $billing,
+                'status' => 'active',
+                'provider' => $provider,
+                'current_period_end' => $periodEnd,
+                'cancelled_at' => null,
+                'renewal_card_last4' => $renewalCard['last4'] ?? null,
+                'renewal_card_brand' => $renewalCard['brand'] ?? null,
+                'renewal_card_holder_name' => $renewalCard['holder'] ?? null,
+                'renewal_user_id' => $user->id,
+            ],
+        );
+
+        $payment->update([
+            'status' => 'succeeded',
+            'paid_at' => now(),
+            'subscription_id' => $subscription->id,
+            'failure_reason' => null,
+        ]);
+
+        $family->update(['plan' => $plan->code]);
+
+        $this->logEvent($payment, $user, 'payment_succeeded', 'Pago exitoso', [
+            'payment_reference' => $payment->payment_reference,
+            'provider' => $provider,
+        ]);
+
+        $this->logEvent($payment, $user, 'subscription_activated', 'Suscripción activada', [
+            'subscription_id' => $subscription->id,
+            'plan_code' => $plan->code,
+            'current_period_end' => $periodEnd->toIso8601String(),
+        ]);
+
+        $this->notifications->notifyFamily(
+            $user,
+            'subscription_checkout',
+            'Plan activado',
+            "{$user->name} activó el plan {$plan->code}",
+            ['entity_type' => 'subscription', 'entity_id' => $subscription->id],
+        );
+
+        return $subscription;
     }
 
     private function logEvent(

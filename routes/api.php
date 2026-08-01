@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\V1\Ocr\OcrController;
 use App\Http\Controllers\Api\V1\Profile\ProfileController;
 use App\Http\Controllers\Api\V1\School\SchoolBroadcastController;
 use App\Http\Controllers\Api\V1\School\SchoolEnrollmentController;
+use App\Http\Controllers\Api\V1\Subscription\MercadoPagoWebhookController;
 use App\Http\Controllers\Api\V1\Subscription\SubscriptionController;
 use App\Http\Controllers\Api\V1\Support\SupportController;
 use App\Http\Controllers\Api\V1\Task\TaskController;
@@ -29,6 +30,10 @@ Route::get('/v1/health', function () {
 
     return response()->json($payload, $payload['status'] === 'ok' ? 200 : 503);
 });
+
+// Mercado Pago: webhook público + página de retorno WebView.
+Route::post('/v1/webhooks/mercadopago', MercadoPagoWebhookController::class);
+Route::get('/v1/subscriptions/mp/return', [SubscriptionController::class, 'mercadoPagoReturn']);
 
 Route::prefix('v1/auth')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
@@ -116,10 +121,12 @@ Route::prefix('v1')->middleware(['api.auth', 'tenant'])->group(function () {
     Route::patch('/support/tickets/{ticket}', [SupportController::class, 'update']);
 
     Route::get('/subscriptions/plans', [SubscriptionController::class, 'plans']);
+    Route::get('/subscriptions/checkout-config', [SubscriptionController::class, 'checkoutConfig']);
     Route::get('/subscriptions/current', [SubscriptionController::class, 'current']);
     Route::get('/subscriptions/payments', [SubscriptionController::class, 'payments']);
     Route::get('/subscriptions/payments/{payment}', [SubscriptionController::class, 'showPayment']);
     Route::post('/subscriptions/checkout', [SubscriptionController::class, 'checkout']);
+    Route::post('/subscriptions/checkout/mp', [SubscriptionController::class, 'checkoutMercadoPago']);
     Route::post('/subscriptions/cancel', [SubscriptionController::class, 'cancel']);
     Route::post('/subscriptions/resume', [SubscriptionController::class, 'resume']);
 

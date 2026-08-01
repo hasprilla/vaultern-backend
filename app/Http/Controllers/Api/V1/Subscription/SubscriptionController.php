@@ -8,20 +8,23 @@ use App\Http\Controllers\Controller;
 use App\Models\Family;
 use App\Models\SubscriptionPayment;
 use App\Models\SubscriptionPlan;
+use App\Services\MercadoPago\MercadoPagoCheckoutService;
 use App\Services\PlanFeatureService;
 use App\Services\SubscriptionBillingService;
 use App\Services\SubscriptionCancelService;
 use App\Services\SubscriptionCheckoutService;
 use App\Services\SubscriptionRenewalService;
+use App\Support\SubscriptionPlanCatalog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
+use Illuminate\Http\Response;
 
 class SubscriptionController extends Controller
 {
     public function __construct(
         private readonly PlanFeatureService $planFeatures,
         private readonly SubscriptionCheckoutService $checkoutService,
+        private readonly MercadoPagoCheckoutService $mpCheckoutService,
         private readonly SubscriptionCancelService $cancelService,
         private readonly SubscriptionRenewalService $renewalService,
         private readonly SubscriptionBillingService $billingService,
@@ -29,13 +32,38 @@ class SubscriptionController extends Controller
 
     public function plans(): JsonResponse
     {
+        SubscriptionPlanCatalog::ensureSeeded();
+
         $plans = SubscriptionPlan::query()
             ->where('is_active', true)
             ->whereNotIn('code', ['school'])
             ->orderBy('sort_order')
             ->get();
 
-        return response()->json(['data' => $plans]);
+        $mpEnabled = (bool) config('mercadopago.enabled');
+
+        return response()->json([
+            'data' => $plans,
+            'meta' => [
+                'checkout' => $mpEnabled ? 'mercadopago' : 'simulated',
+                'mercadopago_enabled' => $mpEnabled,
+                'currency' => 'COP',
+            ],
+        ]);
+    }
+
+    public function checkoutConfig(): JsonResponse
+    {
+        $mpEnabled = (bool) config('mercadopago.enabled')
+            && filled(config('mercadopago.access_token'));
+
+        return response()->json([
+            'data' => [
+                'checkout' => $mpEnabled ? 'mercadopago' : 'simulated',
+                'mercadopago_enabled' => $mpEnabled,
+                'currency' => 'COP',
+            ],
+        ]);
     }
 
     public function current(Request $request): JsonResponse
@@ -83,19 +111,19 @@ class SubscriptionController extends Controller
             return response()->json(['message' => 'Familia no encontrada'], 404);
         }
 
+        // Normalizar año 2 dígitos → 4 (Flutter envía 2030; algunos clientes envían 30).
+        $expYear = (int) $request->input('exp_year', 0);
+        if ($expYear > 0 && $expYear < 100) {
+            $request->merge(['exp_year' => 2000 + $expYear]);
+        }
+
         $validated = $request->validate([
-            'plan_code' => [
-                'required',
-                'string',
-                Rule::exists('subscription_plans', 'code')
-                    ->where('is_active', true)
-                    ->whereNot('code', 'free'),
-            ],
+            'plan_code' => ['required', 'string', 'max:40'],
             'billing' => ['nullable', 'string', 'in:monthly,yearly'],
             'simulated' => ['nullable', 'boolean'],
             'card_number' => ['required', 'string', 'min:13', 'max:23'],
             'exp_month' => ['required', 'integer', 'min:1', 'max:12'],
-            'exp_year' => ['required', 'integer', 'min:'.(int) date('y'), 'max:'.((int) date('Y') + 20)],
+            'exp_year' => ['required', 'integer', 'min:'.(int) date('Y'), 'max:'.((int) date('Y') + 20)],
             'cvc' => ['required', 'string', 'min:3', 'max:4'],
             'cardholder_name' => ['required', 'string', 'min:3', 'max:120'],
         ]);
@@ -111,6 +139,80 @@ class SubscriptionController extends Controller
         }
 
         return response()->json(['data' => $result], 201);
+    }
+
+    public function checkoutMercadoPago(Request $request): JsonResponse
+    {
+        $family = $this->resolveFamily($request);
+        if ($family === null) {
+            return response()->json(['message' => 'Familia no encontrada'], 404);
+        }
+
+        $validated = $request->validate([
+            'plan_code' => ['required', 'string', 'max:40'],
+            'billing' => ['nullable', 'string', 'in:monthly,yearly'],
+        ]);
+
+        $result = $this->mpCheckoutService->startCheckout(
+            $family,
+            $request->user(),
+            (string) $validated['plan_code'],
+            (string) ($validated['billing'] ?? 'monthly'),
+        );
+
+        return response()->json([
+            'data' => [
+                'success' => true,
+                'message' => 'Abre Mercado Pago para completar el pago.',
+                'plan_code' => $validated['plan_code'],
+                'billing' => ($validated['billing'] ?? 'monthly') === 'yearly' ? 'yearly' : 'monthly',
+                'mode' => 'mercadopago',
+                'checkout_url' => $result['checkout_url'],
+                'preference_id' => $result['preference_id'],
+                'payment_id' => $result['payment_id'],
+                'payment' => $result['payment'],
+            ],
+        ], 201);
+    }
+
+    /** Página de retorno para WebView tras Checkout Pro. */
+    public function mercadoPagoReturn(Request $request): Response
+    {
+        $resultRaw = (string) $request->query('result', 'pending');
+        $result = in_array($resultRaw, ['success', 'failure', 'pending'], true) ? $resultRaw : 'pending';
+        $paymentId = e((string) $request->query('payment_id', ''));
+        $title = match ($result) {
+            'success' => 'Pago aprobado',
+            'failure' => 'Pago no completado',
+            default => 'Pago pendiente',
+        };
+        $hint = match ($result) {
+            'success' => 'Ya puedes cerrar esta ventana. Tu plan se activará en unos segundos.',
+            'failure' => 'Puedes cerrar esta ventana e intentar de nuevo desde la app.',
+            default => 'Puedes cerrar esta ventana. Revisaremos el estado del pago.',
+        };
+
+        $html = <<<HTML
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{$title}</title>
+  <style>
+    body { font-family: system-ui, sans-serif; text-align: center; padding: 48px 24px; color: #1a1a1a; }
+    h1 { font-size: 1.4rem; margin-bottom: 8px; }
+    p { color: #555; }
+  </style>
+</head>
+<body data-mp-return="{$result}" data-payment-id="{$paymentId}">
+  <h1>{$title}</h1>
+  <p>{$hint}</p>
+</body>
+</html>
+HTML;
+
+        return response($html, 200)->header('Content-Type', 'text/html; charset=UTF-8');
     }
 
     public function cancel(Request $request): JsonResponse
