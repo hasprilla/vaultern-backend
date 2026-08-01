@@ -92,8 +92,10 @@ class FamilyJoinRequestService
             'password' => $request->password,
             'role' => $request->role,
             'family_id' => $request->family_id,
-            'email_verified_at' => now(),
         ]);
+
+        // email_verified_at no es fillable: forzar verificación (entrada por aprobación familiar).
+        $user->forceFill(['email_verified_at' => now()])->save();
 
         FamilyMember::query()->create([
             'id' => (string) Str::uuid(),
@@ -115,7 +117,7 @@ class FamilyJoinRequestService
             actorId: (int) $approver->id,
         ));
 
-        return $user;
+        return $user->fresh();
     }
 
     public function reject(FamilyJoinRequest $request, User $approver): void

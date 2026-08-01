@@ -20,6 +20,7 @@ use App\Http\Resources\Api\V1\SessionResource;
 use App\Http\Resources\Api\V1\UserResource;
 use App\Infrastructure\Auth\TokenService;
 use App\Models\Family;
+use App\Models\FamilyJoinRequest;
 use App\Models\FamilyMember;
 use App\Models\User;
 use App\Services\FamilyNotificationService;
@@ -242,10 +243,26 @@ class AuthController extends Controller
         }
 
         if ($user->email_verified_at === null) {
-            return response()->json([
-                'message' => 'Confirma tu correo con el código enviado al registrarte.',
-                'code'    => 'email_not_verified',
-            ], 403);
+            // Cuentas creadas por aprobación de join a veces quedaron sin verified_at
+            // (mass assignment). Si hay membresía activa + join aprobado, sanear.
+            $joinedViaApproval = $user->family_id !== null
+                && FamilyMember::query()
+                    ->where('user_id', $user->id)
+                    ->where('status', 'active')
+                    ->exists()
+                && FamilyJoinRequest::query()
+                    ->where('email', $user->email)
+                    ->where('status', 'approved')
+                    ->exists();
+
+            if ($joinedViaApproval) {
+                $user->forceFill(['email_verified_at' => now()])->save();
+            } else {
+                return response()->json([
+                    'message' => 'Confirma tu correo con el código enviado al registrarte.',
+                    'code'    => 'email_not_verified',
+                ], 403);
+            }
         }
 
         if ($user->account_status === 'deactivated') {

@@ -235,13 +235,42 @@ class FamilyController extends Controller
             ->findOrFail($joinRequest);
 
         $user = $this->joinRequests->approve($model, $request->user());
+        $approver = $request->user();
+        $approverRole = $approver->role === 'madre' ? 'madre' : 'padre';
 
-        $this->notifications->notifyFamily(
-            $request->user(),
-            'family_join',
-            'Nuevo miembro en la familia',
-            "{$request->user()->name} aprobó la entrada de {$user->name}",
-            ['entity_type' => 'user', 'entity_id' => (string) $user->id],
+        // Aviso al resto de la familia (sin el nuevo miembro).
+        $otherIds = User::query()
+            ->where('family_id', $family)
+            ->where('id', '!=', $approver->id)
+            ->where('id', '!=', $user->id)
+            ->pluck('id')
+            ->all();
+
+        if ($otherIds !== []) {
+            $this->notifications->notifyUsers(
+                $approver,
+                $otherIds,
+                'family_join',
+                'Nuevo miembro en la familia',
+                "{$approver->name} aprobó la entrada de {$user->name}",
+                ['entity_type' => 'user', 'entity_id' => (string) $user->id],
+            );
+        }
+
+        // Notificar a quien fue aceptado: rol + nombre del aprobador.
+        $this->notifications->notifyUsers(
+            $approver,
+            [(int) $user->id],
+            'family_join_approved',
+            'Solicitud aceptada',
+            "Tu {$approverRole} {$approver->name} aceptó tu solicitud. Ya puedes iniciar sesión en Zumifly.",
+            [
+                'entity_type'   => 'user',
+                'entity_id'     => (string) $user->id,
+                'approver_id'   => (int) $approver->id,
+                'approver_name' => $approver->name,
+                'approver_role' => $approverRole,
+            ],
         );
 
         return response()->json([
