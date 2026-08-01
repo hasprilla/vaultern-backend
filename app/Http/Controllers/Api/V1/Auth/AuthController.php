@@ -57,15 +57,9 @@ class AuthController extends Controller
                 ->update(['role' => $existing->role]);
 
             $this->registerDevice($request, $existing);
-            $this->emailVerification->send($existing);
+            $delivery = $this->emailVerification->send($existing);
 
-            return response()->json([
-                'message' => 'Te enviamos un código por notificación push y por correo electrónico.',
-                'data'    => [
-                    'requires_verification' => true,
-                    'email'                 => $existing->email,
-                ],
-            ], 201);
+            return response()->json($this->verificationResponse($existing->email, $delivery), 201);
         }
 
         $family = Family::query()->create([
@@ -96,15 +90,9 @@ class AuthController extends Controller
         ]);
 
         $this->registerDevice($request, $user);
-        $this->emailVerification->send($user);
+        $delivery = $this->emailVerification->send($user);
 
-        return response()->json([
-            'message' => 'Te enviamos un código por notificación push y por correo electrónico.',
-            'data'    => [
-                'requires_verification' => true,
-                'email'                 => $user->email,
-            ],
-        ], 201);
+        return response()->json($this->verificationResponse($user->email, $delivery), 201);
     }
 
     public function verifyEmail(VerifyEmailRequest $request): JsonResponse
@@ -137,9 +125,13 @@ class AuthController extends Controller
         }
 
         $this->registerDevice($request, $user);
-        $this->emailVerification->send($user);
+        $delivery = $this->emailVerification->send($user);
+        $payload = $this->verificationResponse($user->email, $delivery);
+        $payload['message'] = $delivery['delivered']
+            ? 'Código reenviado por push y por correo electrónico.'
+            : 'No pudimos enviar push ni correo. Usa el código que te mostramos en la app.';
 
-        return response()->json(['message' => 'Código reenviado por push y por correo electrónico.']);
+        return response()->json($payload);
     }
 
     public function join(JoinFamilyRequest $request): JsonResponse
@@ -364,5 +356,31 @@ class AuthController extends Controller
             $request->validated('platform'),
             $request->validated('fcm_token'),
         );
+    }
+
+    /**
+     * @param  array{code: string, delivered: bool, channels: array{push: bool, mail: bool}}  $delivery
+     * @return array{message: string, data: array<string, mixed>}
+     */
+    private function verificationResponse(string $email, array $delivery): array
+    {
+        $data = [
+            'requires_verification' => true,
+            'email'                 => $email,
+            'delivery'              => $delivery['channels'],
+        ];
+
+        // Si push y correo fallan, devolvemos el OTP para no bloquear el onboarding (cPanel sin SMTP/FCM).
+        if (! $delivery['delivered']) {
+            $data['otp'] = $delivery['code'];
+            $data['otp_fallback'] = true;
+        }
+
+        return [
+            'message' => $delivery['delivered']
+                ? 'Te enviamos un código por notificación push y por correo electrónico.'
+                : 'No pudimos enviar el código por push ni correo. Úsalo en pantalla para continuar.',
+            'data'    => $data,
+        ];
     }
 }

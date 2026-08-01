@@ -46,8 +46,11 @@ class FcmPushService
         }
     }
 
-    /** @param array<string, mixed> $data */
-    public function sendVerificationCode(User $user, string $code): void
+    /**
+     * @param  array<string, mixed>  $data
+     * @return bool true si se intentó enviar a al menos un token con credenciales válidas
+     */
+    public function sendVerificationCode(User $user, string $code): bool
     {
         $tokens = Device::query()
             ->where('user_id', $user->id)
@@ -64,7 +67,15 @@ class FcmPushService
                 'email'   => $user->email,
             ]);
 
-            return;
+            return false;
+        }
+
+        if ($this->tokens->get(true) === null) {
+            Log::error('FCM verificación omitido: sin credenciales Firebase.', [
+                'credentials' => config('firebase.credentials'),
+            ]);
+
+            return false;
         }
 
         $title = 'Código de verificación';
@@ -80,6 +91,8 @@ class FcmPushService
         foreach ($tokens as $token) {
             $this->sendToToken($token, $title, $body, $data, force: true);
         }
+
+        return true;
     }
 
     /** @param array<string, mixed> $data */

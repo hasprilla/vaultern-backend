@@ -17,7 +17,14 @@ class EmailVerificationService
 {
     public function __construct(private readonly FcmPushService $fcm) {}
 
-    public function send(User $user): void
+    /**
+     * @return array{
+     *     code: string,
+     *     delivered: bool,
+     *     channels: array{push: bool, mail: bool}
+     * }
+     */
+    public function send(User $user): array
     {
         $code = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
 
@@ -29,25 +36,34 @@ class EmailVerificationService
             ],
         );
 
-        $this->fcm->sendVerificationCode($user, $code);
+        $pushOk = $this->fcm->sendVerificationCode($user, $code);
+        $mailOk = $this->sendMail($user, $code);
 
-        // Docker/local: sin FCM/SMTP reales el OTP solo queda en logs.
-        if (app()->environment(['local', 'testing']) || (bool) config('app.debug')) {
-            Log::info('OTP verificación (dev)', [
-                'email' => $user->email,
-                'code'  => $code,
+        // log/array no entregan a bandeja real
+        if (in_array((string) config('mail.default'), ['log', 'array'], true)) {
+            $mailOk = false;
+        }
+
+        $delivered = $pushOk || $mailOk;
+
+        if (! $delivered || app()->environment(['local', 'testing']) || (bool) config('app.debug')) {
+            Log::info('OTP verificación', [
+                'email'     => $user->email,
+                'code'      => $code,
+                'delivered' => $delivered,
+                'push'      => $pushOk,
+                'mail'      => $mailOk,
             ]);
         }
 
-        try {
-            Mail::to($user->email)->send(new VerifyEmailMail($user->name, $code));
-        } catch (\Throwable $e) {
-            Log::error('No se pudo enviar correo de verificación', [
-                'user_id' => $user->id,
-                'email'   => $user->email,
-                'error'   => $e->getMessage(),
-            ]);
-        }
+        return [
+            'code'      => $code,
+            'delivered' => $delivered,
+            'channels'  => [
+                'push' => $pushOk,
+                'mail' => $mailOk,
+            ],
+        ];
     }
 
     public function verify(string $email, string $code): User
@@ -76,5 +92,22 @@ class EmailVerificationService
         $record->delete();
 
         return $user->fresh();
+    }
+
+    private function sendMail(User $user, string $code): bool
+    {
+        try {
+            Mail::to($user->email)->send(new VerifyEmailMail($user->name, $code));
+
+            return true;
+        } catch (\Throwable $e) {
+            Log::error('No se pudo enviar correo de verificación', [
+                'user_id' => $user->id,
+                'email'   => $user->email,
+                'error'   => $e->getMessage(),
+            ]);
+
+            return false;
+        }
     }
 }
