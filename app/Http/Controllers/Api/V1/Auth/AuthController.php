@@ -146,7 +146,24 @@ class AuthController extends Controller
             return response()->json(['message' => 'Código de invitación inválido'], 422);
         }
 
-        $inviter = User::query()->findOrFail($request->validated('invited_by'));
+        $inviterId = $request->validated('invited_by');
+        $inviter = $inviterId !== null
+            ? User::query()->find($inviterId)
+            : null;
+
+        if ($inviter === null || (string) $inviter->family_id !== (string) $family->id) {
+            $inviter = User::query()
+                ->where('family_id', $family->id)
+                ->whereIn('role', ['padre', 'madre'])
+                ->orderBy('id')
+                ->first();
+        }
+
+        if ($inviter === null) {
+            return response()->json([
+                'message' => 'Esta familia no tiene un padre o madre que pueda aprobar invitaciones.',
+            ], 422);
+        }
 
         $joinRequest = $this->joinRequests->submit(
             $family,
