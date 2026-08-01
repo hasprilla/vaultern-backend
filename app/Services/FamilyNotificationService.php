@@ -5,10 +5,13 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Jobs\NotifyFamilyJob;
+use App\Models\Family;
 use App\Models\User;
 
 class FamilyNotificationService
 {
+    public function __construct(private readonly ChildGuardianService $guardians) {}
+
     /**
      * Notifica a todos los miembros de la familia del actor, excepto al actor.
      *
@@ -52,6 +55,49 @@ class FamilyNotificationService
             ->all();
 
         $this->enqueue($actor->family_id, (int) $actor->id, $parentIds, $type, $title, $body, $data);
+    }
+
+    /**
+     * Notifica solo a los custodios (padre/madre/tutor) de un hijo concreto.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public function notifyChildGuardians(
+        User $actor,
+        int $childUserId,
+        string $type,
+        string $title,
+        string $body,
+        array $data = [],
+    ): void {
+        if ($actor->family_id === null) {
+            return;
+        }
+
+        $recipientIds = $this->guardians->guardianIdsOfChild($childUserId);
+
+        // El dueño de la membresía siempre recibe alertas de cualquier hijo.
+        $ownerId = Family::query()
+            ->where('id', $actor->family_id)
+            ->value('owner_user_id');
+        if ($ownerId !== null) {
+            $recipientIds[] = (int) $ownerId;
+            $recipientIds = array_values(array_unique($recipientIds));
+        }
+
+        $this->enqueue(
+            $actor->family_id,
+            (int) $actor->id,
+            $recipientIds,
+            $type,
+            $title,
+            $body,
+            array_merge($data, [
+                'entity_type' => $data['entity_type'] ?? 'user',
+                'entity_id'   => $data['entity_id'] ?? (string) $childUserId,
+                'child_id'    => $childUserId,
+            ]),
+        );
     }
 
     /**

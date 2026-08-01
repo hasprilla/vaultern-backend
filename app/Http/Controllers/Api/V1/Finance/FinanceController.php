@@ -7,9 +7,11 @@ namespace App\Http\Controllers\Api\V1\Finance;
 use App\Domains\Finance\Entities\FinanceReportPeriod;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Concerns\ResolvesPagination;
+use App\Http\Controllers\Concerns\ScopesByChildGuardianship;
 use App\Models\Budget;
-use App\Models\Family;
 use App\Models\Transaction;
+use App\Models\User;
+use App\Services\ChildGuardianService;
 use App\Services\FamilyNotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -18,8 +20,12 @@ use Illuminate\Support\Str;
 class FinanceController extends Controller
 {
     use ResolvesPagination;
+    use ScopesByChildGuardianship;
 
-    public function __construct(private readonly FamilyNotificationService $notifications) {}
+    public function __construct(
+        private readonly FamilyNotificationService $notifications,
+        private readonly ChildGuardianService $guardians,
+    ) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -27,10 +33,14 @@ class FinanceController extends Controller
             return response()->json(['message' => 'Forbidden'], 403);
         }
 
-        $query = Transaction::query()->with('child')->orderByDesc('transaction_date');
+        $query = $this->transactionsForGuardian($request->user(), $this->guardians)
+            ->with('child')
+            ->orderByDesc('transaction_date');
 
         if ($request->filled('child_id')) {
-            $query->where('child_id', $request->integer('child_id'));
+            $childId = $request->integer('child_id');
+            $this->assertCanAccessChild($request->user(), $this->guardians, $childId);
+            $query->where('child_id', $childId);
         }
 
         $transactions = $query->paginate($this->perPage($request));
@@ -51,21 +61,20 @@ class FinanceController extends Controller
             'category'         => ['nullable', 'string', 'max:50'],
             'description'      => ['nullable', 'string', 'max:255'],
             'transaction_date' => ['required', 'date'],
-            'child_id'         => ['nullable', 'integer', 'exists:users,id'],
+            'child_id'         => ['required', 'integer', 'exists:users,id'],
         ]);
 
-        if (isset($validated['child_id'])) {
-            $child = \App\Models\User::query()->findOrFail($validated['child_id']);
-            if ($child->family_id !== $request->user()->family_id || $child->role !== 'hijo') {
-                return response()->json(['message' => 'Hijo no válido para esta familia'], 422);
-            }
+        $child = User::query()->findOrFail($validated['child_id']);
+        if ($child->family_id !== $request->user()->family_id || $child->role !== 'hijo') {
+            return response()->json(['message' => 'Hijo no válido para esta familia'], 422);
         }
+        $this->assertCanAccessChild($request->user(), $this->guardians, (int) $child->id);
 
         $transaction = Transaction::query()->create([
             'id'               => (string) Str::uuid(),
             'family_id'        => $request->user()->family_id,
             'user_id'          => $request->user()->id,
-            'child_id'         => $validated['child_id'] ?? null,
+            'child_id'         => $validated['child_id'],
             ...$validated,
             'currency'         => $validated['currency'] ?? 'COP',
         ]);
@@ -74,11 +83,12 @@ class FinanceController extends Controller
 
         $label = $validated['type'] === 'income' ? 'Ingreso' : 'Gasto';
         $amount = number_format((float) $validated['amount'], 0, ',', '.');
-        $this->notifications->notifyFamily(
+        $this->notifications->notifyChildGuardians(
             $request->user(),
+            (int) $child->id,
             'finance_transaction',
             "$label registrado",
-            "{$request->user()->name} registró $label por \$$amount COP",
+            "{$request->user()->name} registró $label de {$child->name} por \$$amount COP",
             ['entity_type' => 'transaction', 'entity_id' => $transaction->id],
         );
 
@@ -91,7 +101,7 @@ class FinanceController extends Controller
             return response()->json(['message' => 'Forbidden'], 403);
         }
 
-        $model = Transaction::query()->findOrFail($transaction);
+        $model = $this->transactionsForGuardian($request->user(), $this->guardians)->findOrFail($transaction);
 
         $validated = $request->validate([
             'amount'           => ['sometimes', 'numeric', 'min:0'],
@@ -100,19 +110,26 @@ class FinanceController extends Controller
             'category'         => ['nullable', 'string', 'max:50'],
             'description'      => ['nullable', 'string', 'max:255'],
             'transaction_date' => ['sometimes', 'date'],
-            'child_id'         => ['nullable', 'integer', 'exists:users,id'],
+            'child_id'         => ['sometimes', 'integer', 'exists:users,id'],
         ]);
+
+        if (isset($validated['child_id'])) {
+            $this->assertCanAccessChild($request->user(), $this->guardians, (int) $validated['child_id']);
+        }
 
         $model->update($validated);
         $model->load('child');
 
-        $this->notifications->notifyFamily(
-            $request->user(),
-            'finance_transaction',
-            'Transacción actualizada',
-            "{$request->user()->name} actualizó una transacción",
-            ['entity_type' => 'transaction', 'entity_id' => $model->id],
-        );
+        if ($model->child_id !== null) {
+            $this->notifications->notifyChildGuardians(
+                $request->user(),
+                (int) $model->child_id,
+                'finance_transaction',
+                'Transacción actualizada',
+                "{$request->user()->name} actualizó una transacción de {$model->child?->name}",
+                ['entity_type' => 'transaction', 'entity_id' => $model->id],
+            );
+        }
 
         return response()->json(['data' => $model]);
     }
@@ -124,7 +141,7 @@ class FinanceController extends Controller
         }
 
         return response()->json([
-            'data' => Transaction::query()->findOrFail($transaction),
+            'data' => $this->transactionsForGuardian($request->user(), $this->guardians)->findOrFail($transaction),
         ]);
     }
 
@@ -134,17 +151,24 @@ class FinanceController extends Controller
             return response()->json(['message' => 'Forbidden'], 403);
         }
 
-        $model = Transaction::query()->findOrFail($transaction);
+        $model = $this->transactionsForGuardian($request->user(), $this->guardians)
+            ->with('child')
+            ->findOrFail($transaction);
         $description = $model->description ?? 'Transacción';
+        $childId = $model->child_id !== null ? (int) $model->child_id : null;
+        $childName = $model->child?->name;
         $model->delete();
 
-        $this->notifications->notifyFamily(
-            $request->user(),
-            'finance_transaction',
-            'Transacción eliminada',
-            "{$request->user()->name} eliminó «{$description}»",
-            ['entity_type' => 'transaction', 'entity_id' => $transaction],
-        );
+        if ($childId !== null) {
+            $this->notifications->notifyChildGuardians(
+                $request->user(),
+                $childId,
+                'finance_transaction',
+                'Transacción eliminada',
+                "{$request->user()->name} eliminó «{$description}»".($childName ? " de {$childName}" : ''),
+                ['entity_type' => 'transaction', 'entity_id' => $transaction],
+            );
+        }
 
         return response()->json(['message' => 'Transacción eliminada.']);
     }
@@ -266,26 +290,28 @@ class FinanceController extends Controller
         }
 
         $from = now()->subDays($period->days())->startOfDay();
+        $base = $this->transactionsForGuardian($request->user(), $this->guardians)
+            ->where('transaction_date', '>=', $from);
 
-        $income = Transaction::query()
-            ->where('type', 'income')
-            ->where('transaction_date', '>=', $from)
-            ->sum('amount');
+        if ($request->filled('child_id')) {
+            $childId = $request->integer('child_id');
+            $this->assertCanAccessChild($request->user(), $this->guardians, $childId);
+            $base->where('child_id', $childId);
+        }
 
-        $expense = Transaction::query()
-            ->where('type', 'expense')
-            ->where('transaction_date', '>=', $from)
-            ->sum('amount');
+        $income = (clone $base)->where('type', 'income')->sum('amount');
+        $expense = (clone $base)->where('type', 'expense')->sum('amount');
 
         return response()->json([
             'data' => [
-                'period'  => $period->value,
-                'label'   => $period->label(),
-                'income'  => (float) $income,
-                'expense' => (float) $expense,
-                'balance' => (float) $income - (float) $expense,
-                'from'    => $from->toDateString(),
-                'to'      => now()->toDateString(),
+                'period'   => $period->value,
+                'label'    => $period->label(),
+                'income'   => (float) $income,
+                'expense'  => (float) $expense,
+                'balance'  => (float) $income - (float) $expense,
+                'from'     => $from->toDateString(),
+                'to'       => now()->toDateString(),
+                'child_id' => $request->filled('child_id') ? (string) $request->integer('child_id') : null,
             ],
         ]);
     }

@@ -12,7 +12,7 @@ class UserResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
-        return [
+        $payload = [
             'id'              => (string) $this->id,
             'name'            => $this->name,
             'email'           => $this->email,
@@ -26,6 +26,16 @@ class UserResource extends JsonResource
             'notification_preferences' => $this->resolvedNotificationPreferences(),
             'created_at'      => $this->created_at?->toIso8601String(),
         ];
+
+        if ($this->role === 'hijo' && $this->relationLoaded('guardians')) {
+            $payload['guardian_ids'] = $this->guardians
+                ->pluck('parent_user_id')
+                ->map(fn ($id) => (string) $id)
+                ->values()
+                ->all();
+        }
+
+        return $payload;
     }
 
     private function resolveAvatarUrl(Request $request): ?string

@@ -68,6 +68,7 @@ class DemoHhUserSeeder extends Seeder
             'name' => 'Familia Harvey',
             'plan' => 'premium',
             'invite_code' => 'HHFAMILY',
+            'owner_user_id' => $harvey->id,
             'timezone' => 'America/Bogota',
             'settings' => ['locale' => 'es', 'currency' => 'COP'],
         ]);

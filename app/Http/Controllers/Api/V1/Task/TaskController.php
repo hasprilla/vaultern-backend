@@ -8,6 +8,7 @@ use App\Events\TaskChanged;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Concerns\ResolvesPagination;
 use App\Models\Task;
+use App\Models\User;
 use App\Services\FamilyNotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -96,12 +97,12 @@ class TaskController extends Controller
             ? "{$request->user()->name} creó «{$task->title}» y la asignó a {$task->assignee->name}"
             : "{$request->user()->name} creó la tarea «{$task->title}»";
 
-        $this->notifications->notifyFamily(
+        $this->notifyTaskAudience(
             $request->user(),
+            $task,
             'task_created',
             'Nueva tarea',
             $body,
-            ['entity_type' => 'task', 'entity_id' => $task->id],
         );
 
         event(new TaskChanged(
@@ -143,12 +144,12 @@ class TaskController extends Controller
         $model->update($validated);
         $model = $model->fresh(['creator', 'assignee']);
 
-        $this->notifications->notifyFamily(
+        $this->notifyTaskAudience(
             $request->user(),
+            $model,
             'task_updated',
             'Tarea actualizada',
             "{$request->user()->name} actualizó «{$model->title}»",
-            ['entity_type' => 'task', 'entity_id' => $model->id],
         );
 
         event(new TaskChanged(
@@ -170,17 +171,18 @@ class TaskController extends Controller
             return response()->json(['message' => 'Forbidden'], 403);
         }
 
-        $model = Task::query()->findOrFail($task);
+        $model = Task::query()->with('assignee')->findOrFail($task);
         $title = $model->title;
-        $model->delete();
 
-        $this->notifications->notifyFamily(
+        $this->notifyTaskAudience(
             $request->user(),
+            $model,
             'task_deleted',
             'Tarea eliminada',
             "{$request->user()->name} eliminó la tarea «{$title}»",
-            ['entity_type' => 'task', 'entity_id' => $task],
         );
+
+        $model->delete();
 
         event(new TaskChanged(
             familyId: (string) $request->user()->family_id,
@@ -206,12 +208,12 @@ class TaskController extends Controller
 
         $model = $model->fresh(['creator', 'assignee']);
 
-        $this->notifications->notifyFamily(
+        $this->notifyTaskAudience(
             $request->user(),
+            $model,
             'task_completed',
             'Tarea completada',
             "{$request->user()->name} completó «{$model->title}»",
-            ['entity_type' => 'task', 'entity_id' => $model->id],
         );
 
         event(new TaskChanged(
@@ -241,12 +243,12 @@ class TaskController extends Controller
         $model->update(['assigned_to' => $validated['assigned_to']]);
         $model = $model->fresh(['assignee']);
 
-        $this->notifications->notifyFamily(
+        $this->notifyTaskAudience(
             $request->user(),
+            $model,
             'task_assigned',
             'Tarea asignada',
             "{$request->user()->name} asignó «{$model->title}» a {$model->assignee?->name}",
-            ['entity_type' => 'task', 'entity_id' => $model->id],
         );
 
         event(new TaskChanged(
@@ -260,5 +262,55 @@ class TaskController extends Controller
         ));
 
         return response()->json(['data' => $model]);
+    }
+
+    /**
+     * Si la tarea está asignada a un hijo, solo notifica a sus custodios (+ el hijo).
+     * Si no, mantiene el fan-out familiar.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function notifyTaskAudience(
+        User $actor,
+        Task $task,
+        string $type,
+        string $title,
+        string $body,
+        array $data = [],
+    ): void {
+        $payload = array_merge($data, [
+            'entity_type' => 'task',
+            'entity_id'   => (string) $task->id,
+        ]);
+
+        $assignee = $task->relationLoaded('assignee')
+            ? $task->assignee
+            : ($task->assigned_to !== null ? User::query()->find($task->assigned_to) : null);
+
+        if ($assignee !== null && $assignee->role === 'hijo') {
+            $this->notifications->notifyChildGuardians(
+                $actor,
+                (int) $assignee->id,
+                $type,
+                $title,
+                $body,
+                $payload,
+            );
+
+            if ((int) $assignee->id !== (int) $actor->id) {
+                $this->notifications->notifyUsers(
+                    $actor,
+                    [(int) $assignee->id],
+                    $type,
+                    $title,
+                    $body,
+                    $payload,
+                );
+            }
+
+            return;
+        }
+
+        $this->notifications->notifyFamily($actor, $type, $title, $body, $payload);
     }
 }

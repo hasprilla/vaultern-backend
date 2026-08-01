@@ -14,6 +14,7 @@ use App\Models\Family;
 use App\Models\FamilyJoinRequest;
 use App\Models\FamilyMember;
 use App\Models\User;
+use App\Services\ChildGuardianService;
 use App\Services\FamilyNotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -25,24 +26,50 @@ class FamilyController extends Controller
     public function __construct(
         private readonly FamilyJoinRequestService $joinRequests,
         private readonly FamilyNotificationService $notifications,
+        private readonly ChildGuardianService $guardians,
         private readonly \App\Services\PlanFeatureService $planFeatures,
     ) {}
+
     public function index(Request $request): JsonResponse
     {
-        $family = Family::query()->findOrFail($request->user()->family_id);
+        $viewer = $request->user();
+        $family = Family::query()->findOrFail($viewer->family_id);
         $members = FamilyMember::query()
-            ->with('user')
+            ->with(['user.guardians'])
             ->where('family_id', $family->id)
             ->where('status', 'active')
             ->get();
 
+        $myChildIds = $this->guardians->childIdsFor($viewer);
+
+        // Padres/madres solo ven hijos de los que son custodios; adultos siempre visibles.
+        $visible = $members->filter(function (FamilyMember $m) use ($viewer, $myChildIds) {
+            $user = $m->user;
+            if ($user === null) {
+                return false;
+            }
+            if ($user->role !== 'hijo') {
+                return true;
+            }
+            if (! in_array($viewer->role, ['padre', 'madre', 'tutor'], true)) {
+                return true;
+            }
+
+            return in_array((int) $user->id, $myChildIds, true);
+        });
+
+        $isOwner = $family->isOwnedBy($viewer);
+
         return response()->json([
             'data' => [
-                'id'          => $family->id,
-                'name'        => $family->name,
-                'plan'        => $family->plan,
-                'invite_code' => $family->invite_code,
-                'members'     => $members->map(fn (FamilyMember $m) => new UserResource($m->user)),
+                'id'             => $family->id,
+                'name'           => $family->name,
+                'plan'           => $family->plan,
+                'invite_code'    => $family->invite_code,
+                'owner_user_id'  => $family->owner_user_id !== null ? (string) $family->owner_user_id : null,
+                'is_owner'       => $isOwner,
+                'members'        => $visible->values()->map(fn (FamilyMember $m) => new UserResource($m->user)),
+                'my_child_ids'   => array_map('strval', $myChildIds),
             ],
         ]);
     }
@@ -56,9 +83,10 @@ class FamilyController extends Controller
         }
 
         $family = Family::query()->create([
-            'id'   => (string) Str::uuid(),
-            'name' => $request->validated('name'),
-            'plan' => $request->validated('plan') ?? 'free',
+            'id'            => (string) Str::uuid(),
+            'name'          => $request->validated('name'),
+            'plan'          => $request->validated('plan') ?? 'free',
+            'owner_user_id' => $user->id,
         ]);
 
         FamilyMember::query()->create([
@@ -73,9 +101,11 @@ class FamilyController extends Controller
 
         return response()->json([
             'data' => [
-                'id'   => $family->id,
-                'name' => $family->name,
-                'plan' => $family->plan,
+                'id'            => $family->id,
+                'name'          => $family->name,
+                'plan'          => $family->plan,
+                'owner_user_id' => (string) $user->id,
+                'is_owner'      => true,
             ],
         ], 201);
     }
@@ -188,15 +218,50 @@ class FamilyController extends Controller
             'status'    => 'active',
         ]);
 
-        $this->notifications->notifyFamily(
+        // Solo el dueño de la membresía puede asignar custodios adicionales.
+        $guardianIds = $request->user()->isFamilyOwner()
+            ? array_map('intval', $request->validated('guardian_ids') ?? [])
+            : [];
+        $this->guardians->syncForChild($child, $guardianIds, $request->user());
+        $child->load('guardians');
+
+        $this->notifications->notifyChildGuardians(
             $request->user(),
+            (int) $child->id,
             'family_child',
             'Nuevo hijo/a registrado',
-            "{$request->user()->name} registró a {$child->name} en la familia",
+            "{$request->user()->name} registró a {$child->name}",
             ['entity_type' => 'user', 'entity_id' => (string) $child->id],
         );
 
         return response()->json(['data' => new UserResource($child)], 201);
+    }
+
+    public function syncChildGuardians(Request $request, string $family, string $child): JsonResponse
+    {
+        $this->assertFamilyAccess($request, $family);
+
+        if (! $request->user()->isFamilyOwner()) {
+            return response()->json([
+                'message' => 'Solo el dueño de la membresía puede definir quién ve la información de cada hijo.',
+            ], 403);
+        }
+
+        $childUser = User::query()
+            ->where('family_id', $family)
+            ->where('role', 'hijo')
+            ->findOrFail($child);
+
+        $validated = $request->validate([
+            'guardian_ids'   => ['required', 'array', 'min:1'],
+            'guardian_ids.*' => ['integer', 'exists:users,id'],
+        ]);
+
+        $ids = array_map('intval', $validated['guardian_ids']);
+        $this->guardians->syncForChild($childUser, $ids);
+        $childUser->load('guardians');
+
+        return response()->json(['data' => new UserResource($childUser)]);
     }
 
     public function joinRequests(Request $request, string $family): JsonResponse
@@ -304,13 +369,22 @@ class FamilyController extends Controller
     {
         $this->assertFamilyAccess($request, $family);
 
-        if (! $request->user()->canManageFinances()) {
-            return response()->json(['message' => 'Forbidden'], 403);
+        if (! $request->user()->isFamilyOwner()) {
+            return response()->json([
+                'message' => 'Solo el dueño de la membresía puede cambiar roles.',
+            ], 403);
         }
 
         $validated = $request->validate([
             'role' => ['required', 'in:padre,madre,tutor,hijo'],
         ]);
+
+        $familyModel = Family::query()->findOrFail($family);
+        if ((int) $familyModel->owner_user_id === (int) $member && $validated['role'] === 'hijo') {
+            return response()->json([
+                'message' => 'No puedes cambiar el rol del dueño de la membresía a hijo.',
+            ], 422);
+        }
 
         $membership = FamilyMember::query()
             ->where('family_id', $family)

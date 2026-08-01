@@ -73,6 +73,42 @@ class User extends Authenticatable
         return $this->hasMany(FamilyMember::class);
     }
 
+    /** Hijos de los que este padre/madre/tutor es custodio. */
+    public function guardedChildren(): HasMany
+    {
+        return $this->hasMany(ChildGuardian::class, 'parent_user_id');
+    }
+
+    /** Padres/madres/tutores vinculados a este hijo. */
+    public function guardians(): HasMany
+    {
+        return $this->hasMany(ChildGuardian::class, 'child_user_id');
+    }
+
+    /** @return list<int> */
+    public function linkedChildIds(): array
+    {
+        return $this->guardedChildren()->pluck('child_user_id')->map(fn ($id) => (int) $id)->all();
+    }
+
+    public function isGuardianOf(int $childUserId): bool
+    {
+        return $this->guardedChildren()->where('child_user_id', $childUserId)->exists();
+    }
+
+    /** Dueño de la membresía/familia: ve toda la información y otorga permisos de visibilidad. */
+    public function isFamilyOwner(): bool
+    {
+        if ($this->family_id === null) {
+            return false;
+        }
+
+        return Family::query()
+            ->where('id', $this->family_id)
+            ->where('owner_user_id', $this->id)
+            ->exists();
+    }
+
     public function apiTokens(): HasMany
     {
         return $this->hasMany(ApiToken::class);

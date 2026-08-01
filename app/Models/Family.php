@@ -6,6 +6,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Str;
@@ -22,6 +23,7 @@ class Family extends Model
         'name',
         'plan',
         'invite_code',
+        'owner_user_id',
         'timezone',
         'settings',
     ];
@@ -40,6 +42,18 @@ class Family extends Model
                 $family->invite_code = strtoupper(Str::random(8));
             }
         });
+    }
+
+    public function owner(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'owner_user_id');
+    }
+
+    public function isOwnedBy(?User $user): bool
+    {
+        return $user !== null
+            && $this->owner_user_id !== null
+            && (int) $this->owner_user_id === (int) $user->id;
     }
 
     public function members(): HasMany

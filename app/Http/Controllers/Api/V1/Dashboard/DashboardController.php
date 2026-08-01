@@ -7,11 +7,14 @@ namespace App\Http\Controllers\Api\V1\Dashboard;
 use App\Http\Controllers\Controller;
 use App\Models\Task;
 use App\Models\Transaction;
+use App\Services\ChildGuardianService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class DashboardController extends Controller
 {
+    public function __construct(private readonly ChildGuardianService $guardians) {}
+
     public function analytics(Request $request): JsonResponse
     {
         $period = $request->query('period', 'weekly');
@@ -39,9 +42,11 @@ class DashboardController extends Controller
 
         $expenses = 0.0;
         if ($request->user()->canManageFinances()) {
+            $childIds = $this->guardians->childIdsFor($request->user());
             $expenses = (float) Transaction::query()
                 ->where('type', 'expense')
                 ->where('transaction_date', '>=', $from)
+                ->whereIn('child_id', $childIds === [] ? [-1] : $childIds)
                 ->sum('amount');
         }
 
