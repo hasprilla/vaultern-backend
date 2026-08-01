@@ -4,15 +4,11 @@ declare(strict_types=1);
 
 namespace App\Services;
 
-use App\Models\AppNotification;
+use App\Jobs\NotifyFamilyJob;
 use App\Models\User;
-use App\Services\Fcm\FcmPushService;
-use Illuminate\Support\Str;
 
 class FamilyNotificationService
 {
-    public function __construct(private readonly FcmPushService $fcm) {}
-
     /**
      * Notifica a todos los miembros de la familia del actor, excepto al actor.
      *
@@ -55,7 +51,7 @@ class FamilyNotificationService
             ->pluck('id')
             ->all();
 
-        $this->deliver($actor->family_id, $actor, $parentIds, $type, $title, $body, $data);
+        $this->enqueue($actor->family_id, (int) $actor->id, $parentIds, $type, $title, $body, $data);
     }
 
     /**
@@ -74,7 +70,7 @@ class FamilyNotificationService
             return;
         }
 
-        $this->deliver($actor->family_id, $actor, $recipientIds, $type, $title, $body, $data);
+        $this->enqueue($actor->family_id, (int) $actor->id, $recipientIds, $type, $title, $body, $data);
     }
 
     /**
@@ -104,58 +100,35 @@ class FamilyNotificationService
             return;
         }
 
-        $actor = $excludeUserId !== null ? User::query()->find($excludeUserId) : null;
-        $this->deliver($familyId, $actor, $onlyUserIds, $type, $title, $body, $data);
+        $this->enqueue($familyId, $excludeUserId, $onlyUserIds, $type, $title, $body, $data);
     }
 
     /**
      * @param  array<int|string>  $recipientIds
      * @param  array<string, mixed>  $data
      */
-    private function deliver(
+    private function enqueue(
         string $familyId,
-        ?User $actor,
+        ?int $actorId,
         array $recipientIds,
         string $type,
         string $title,
         string $body,
         array $data,
     ): void {
-        $payload = $data;
-        if ($actor !== null) {
-            $payload = array_merge($payload, [
-                'actor_id'   => $actor->id,
-                'actor_name' => $actor->name,
-            ]);
+        $ids = array_values(array_unique(array_map('intval', $recipientIds)));
+        if ($ids === []) {
+            return;
         }
 
-        foreach (array_unique(array_map('intval', $recipientIds)) as $userId) {
-            if ($actor !== null && $userId === (int) $actor->id) {
-                continue;
-            }
-
-            $notification = AppNotification::query()->create([
-                'id'        => (string) Str::uuid(),
-                'family_id' => $familyId,
-                'user_id'   => $userId,
-                'type'      => $type,
-                'title'     => $title,
-                'body'      => $body,
-                'data'      => $payload,
-            ]);
-
-            $recipient = User::query()->find($userId);
-            if ($recipient !== null) {
-                $this->fcm->sendToUser(
-                    $recipient,
-                    $title,
-                    $body,
-                    $type,
-                    array_merge($payload, [
-                        'notification_id' => $notification->id,
-                    ]),
-                );
-            }
-        }
+        NotifyFamilyJob::dispatch(
+            $familyId,
+            $actorId,
+            $ids,
+            $type,
+            $title,
+            $body,
+            $data,
+        );
     }
 }

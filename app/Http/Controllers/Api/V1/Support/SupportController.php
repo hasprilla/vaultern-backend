@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1\Support;
 
+use App\Events\SupportTicketChanged;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Concerns\ResolvesPagination;
 use App\Models\SupportTicket;
 use App\Models\SupportTicketMessage;
+use App\Models\User;
 use App\Services\FamilyNotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -92,6 +94,8 @@ class SupportController extends Controller
             );
         }
 
+        $this->broadcastTicketToStaff($ticket, 'created', (int) $user->id);
+
         return response()->json(['data' => $ticket], 201);
     }
 
@@ -163,6 +167,14 @@ class SupportController extends Controller
                 ['entity_type' => 'support_ticket', 'entity_id' => $ticket->id],
                 [(int) $ticket->user_id],
             );
+            event(new SupportTicketChanged(
+                recipientUserId: (int) $ticket->user_id,
+                ticketId: (string) $ticket->id,
+                action: 'message',
+                status: $ticket->status,
+                subject: $ticket->subject,
+                actorId: (int) $user->id,
+            ));
         } elseif (! $isStaff && $user->family_id !== null) {
             $this->notifications->notifyFamily(
                 $user,
@@ -171,6 +183,7 @@ class SupportController extends Controller
                 "{$user->name} respondió en «{$ticket->subject}»",
                 ['entity_type' => 'support_ticket', 'entity_id' => $ticket->id],
             );
+            $this->broadcastTicketToStaff($ticket, 'message', (int) $user->id);
         }
 
         return response()->json(['data' => $message], 201);
@@ -203,15 +216,43 @@ class SupportController extends Controller
             );
         }
 
+        event(new SupportTicketChanged(
+            recipientUserId: (int) $ticket->user_id,
+            ticketId: (string) $ticket->id,
+            action: 'updated',
+            status: $ticket->status,
+            subject: $ticket->subject,
+            actorId: (int) $request->user()->id,
+        ));
+
         return response()->json(['data' => $ticket]);
     }
 
-    private function canAccessTicket(\App\Models\User $user, SupportTicket $ticket): bool
+    private function canAccessTicket(User $user, SupportTicket $ticket): bool
     {
         if ($user->canManageSupportTickets()) {
             return true;
         }
 
         return (int) $ticket->user_id === (int) $user->id;
+    }
+
+    private function broadcastTicketToStaff(SupportTicket $ticket, string $action, int $actorId): void
+    {
+        $staffIds = User::query()
+            ->where('role', 'soporte')
+            ->pluck('id')
+            ->all();
+
+        foreach ($staffIds as $staffId) {
+            event(new SupportTicketChanged(
+                recipientUserId: (int) $staffId,
+                ticketId: (string) $ticket->id,
+                action: $action,
+                status: $ticket->status,
+                subject: $ticket->subject,
+                actorId: $actorId,
+            ));
+        }
     }
 }

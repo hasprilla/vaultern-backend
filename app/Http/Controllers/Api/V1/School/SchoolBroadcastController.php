@@ -70,7 +70,7 @@ class SchoolBroadcastController extends Controller
             'status'          => 'pending',
         ]);
 
-        DispatchSchoolTaskBroadcastJob::dispatchSync($broadcast->id);
+        DispatchSchoolTaskBroadcastJob::dispatch($broadcast->id);
 
         return response()->json([
             'data' => $broadcast->fresh(['schoolClass', 'creator:id,name']),

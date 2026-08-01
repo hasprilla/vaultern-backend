@@ -1,65 +1,61 @@
-# ⚙️ Vaultern — Zumifly API Backend
+# Vaultern — Zumifly API Backend
 
-> Laravel 12 + PHP 8.4. API REST para Zumifly Family Hub.
+API REST para Zumifly Family Hub. **Target de producción: cPanel** (MySQL + file cache + cola `database` + FCM).
 
-[![CI Pipeline](https://github.com/hasprilla/vaultern-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/hasprilla/vaultern-backend/actions)
-[![Laravel](https://img.shields.io/badge/Laravel-12.x-red.svg)](https://laravel.com)
-[![PHP](https://img.shields.io/badge/PHP-8.4-blue.svg)](https://php.net)
+## Stack real
 
-## 🚀 Stack Tecnológico
+| Pieza | Producción (cPanel) | Local opcional |
+|---|---|---|
+| Framework | Laravel 13 / PHP 8.3+ | igual |
+| DB | MySQL | SQLite o MySQL |
+| Cache / sesión | `file` / `cookie` | `file` |
+| Cola | `database` + cron `schedule:run` | `queue:work` |
+| Push | Firebase FCM | FCM off |
+| WebSockets | **No** (`BROADCAST_CONNECTION=log`) | Reverb opcional |
+| Redis / Horizon | **No** | no usar |
 
-| Categoría | Tecnología |
-|---|---|
-| Framework | Laravel 12 |
-| Runtime | PHP 8.4 |
-| Base de Datos | MySQL 8.0 |
-| Cache/Queue | Redis 7 |
-| Auth | Laravel Sanctum |
-| Queue Worker | Laravel Horizon |
-| WebSockets | Laravel Reverb |
-| Container | Docker + Docker Compose |
-| Orquestación | Kubernetes Ready |
-| Cloud | AWS (ECS/EKS + S3 + RDS) |
+## Deploy cPanel (resumen)
 
-## 📁 Arquitectura — DDD + Clean Architecture
+1. Copiar `.env.cpanel.example` → `.env` y completar credenciales.
+2. `composer install --no-dev --optimize-autoloader`
+3. `php artisan migrate --force`
+4. `chmod -R 775 storage bootstrap/cache`
+5. Cron cada minuto:
+   ```
+   cd /home/USER/ruta/vaultern-backend && /usr/local/bin/php artisan schedule:run >> /dev/null 2>&1
+   ```
+6. Subir `storage/app/firebase-credentials.json` y `FIREBASE_FCM_ENABLED=true`.
 
-```
-app/
-├── Domains/         # Capa de Dominio (Entidades, Value Objects, Eventos)
-├── Application/     # Capa de Aplicación (CQRS: Commands, Handlers, Queries)
-├── Infrastructure/  # Repositorios Eloquent, Cache, Storage, OCR
-└── Http/            # Controladores API REST v1 versionada
-```
+Con eso: notificaciones DB + FCM y jobs (`NotifyFamilyJob`, school broadcast) salen por la cola MySQL. **No hace falta Redis ni Reverb en cPanel.**
 
-## ⚙️ Setup con Docker
+## Local
 
 ```bash
 cp .env.example .env
-docker compose up -d
-docker compose exec app php artisan key:generate
-docker compose exec app php artisan migrate --seed
+php artisan key:generate
+php artisan migrate
+php artisan serve
+# Cola (si QUEUE_CONNECTION=database):
+php artisan queue:work database --tries=3
 ```
 
-## 📡 API Endpoints
+Realtime WebSocket (solo local, opcional):
 
-```
-POST   /api/v1/auth/register
-POST   /api/v1/auth/login
-POST   /api/v1/auth/mfa/verify
-GET    /api/v1/families
-POST   /api/v1/tasks
-POST   /api/v1/ocr/invoice
-GET    /api/v1/finance/reports/monthly
-GET    /api/v1/dashboard/analytics
+```bash
+# .env → BROADCAST_CONNECTION=reverb + keys REVERB_*
+php artisan reverb:start
+# Docker con perfil:
+docker compose --profile realtime up -d
 ```
 
-## 🔒 Seguridad
-- OWASP API Security Top 10
-- Argon2id password hashing
-- Multi-tenant por familia (family_id scoping)
-- Rate Limiting por Redis
-- Audit Logs de todos los cambios
-- AES-256 para datos sensibles
+App Flutter en producción: `--dart-define=REALTIME_ENABLED=false` (por defecto fuera de API local). Sync en vivo = FCM + pull/resync.
+
+## API
+
+Prefijo: `/api/v1` — auth Bearer (tokens propios, no Sanctum de sesión).
+
+Health: `GET /api/v1/health`
 
 ---
+
 **Frontend:** [zumifly-flutter](https://github.com/hasprilla/zumifly-flutter)

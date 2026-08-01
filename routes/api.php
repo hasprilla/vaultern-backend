@@ -48,6 +48,7 @@ Route::prefix('v1')->middleware(['api.auth', 'tenant'])->group(function () {
     Route::post('/auth/refresh', [AuthController::class, 'refresh']);
 
     Route::patch('/profile', [ProfileController::class, 'update']);
+    Route::post('/profile/avatar', [ProfileController::class, 'updateAvatar']);
     Route::post('/profile/password', [ProfileController::class, 'changePassword']);
     Route::post('/profile/fcm-token', [ProfileController::class, 'updateFcmToken']);
     Route::get('/profile/plan-usage', [ProfileController::class, 'planUsage']);

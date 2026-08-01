@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1\Family;
 
+use App\Events\ParentMessageRead;
+use App\Events\ParentMessageSent;
 use App\Http\Controllers\Controller;
 use App\Models\ParentMessage;
 use App\Services\FamilyNotificationService;
@@ -64,6 +66,8 @@ class ParentMessageController extends Controller
             ['entity_type' => 'parent_message', 'entity_id' => $message->id],
         );
 
+        event(new ParentMessageSent($message));
+
         return response()->json(['data' => $message], 201);
     }
 
@@ -76,6 +80,12 @@ class ParentMessageController extends Controller
             ->findOrFail($message);
 
         $model->update(['read' => true]);
+
+        event(new ParentMessageRead(
+            familyId: $family,
+            messageId: (string) $model->id,
+            readerId: (int) $request->user()->id,
+        ));
 
         return response()->json(['message' => 'Mensaje marcado como leído.']);
     }

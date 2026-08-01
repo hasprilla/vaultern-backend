@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1\Task;
 
+use App\Events\TaskChanged;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Concerns\ResolvesPagination;
 use App\Models\Task;
@@ -103,6 +104,16 @@ class TaskController extends Controller
             ['entity_type' => 'task', 'entity_id' => $task->id],
         );
 
+        event(new TaskChanged(
+            familyId: (string) $request->user()->family_id,
+            taskId: (string) $task->id,
+            action: 'created',
+            status: $task->status,
+            title: $task->title,
+            assigneeId: $task->assigned_to !== null ? (int) $task->assigned_to : null,
+            actorId: (int) $request->user()->id,
+        ));
+
         return response()->json(['data' => $task], 201);
     }
 
@@ -140,6 +151,16 @@ class TaskController extends Controller
             ['entity_type' => 'task', 'entity_id' => $model->id],
         );
 
+        event(new TaskChanged(
+            familyId: (string) $request->user()->family_id,
+            taskId: (string) $model->id,
+            action: 'updated',
+            status: $model->status,
+            title: $model->title,
+            assigneeId: $model->assigned_to !== null ? (int) $model->assigned_to : null,
+            actorId: (int) $request->user()->id,
+        ));
+
         return response()->json(['data' => $model]);
     }
 
@@ -160,6 +181,16 @@ class TaskController extends Controller
             "{$request->user()->name} eliminó la tarea «{$title}»",
             ['entity_type' => 'task', 'entity_id' => $task],
         );
+
+        event(new TaskChanged(
+            familyId: (string) $request->user()->family_id,
+            taskId: (string) $task,
+            action: 'deleted',
+            status: null,
+            title: $title,
+            assigneeId: null,
+            actorId: (int) $request->user()->id,
+        ));
 
         return response()->json(['message' => 'Task deleted']);
     }
@@ -182,6 +213,16 @@ class TaskController extends Controller
             "{$request->user()->name} completó «{$model->title}»",
             ['entity_type' => 'task', 'entity_id' => $model->id],
         );
+
+        event(new TaskChanged(
+            familyId: (string) $request->user()->family_id,
+            taskId: (string) $model->id,
+            action: 'completed',
+            status: $model->status,
+            title: $model->title,
+            assigneeId: $model->assigned_to !== null ? (int) $model->assigned_to : null,
+            actorId: (int) $request->user()->id,
+        ));
 
         return response()->json(['data' => $model]);
     }
@@ -207,6 +248,16 @@ class TaskController extends Controller
             "{$request->user()->name} asignó «{$model->title}» a {$model->assignee?->name}",
             ['entity_type' => 'task', 'entity_id' => $model->id],
         );
+
+        event(new TaskChanged(
+            familyId: (string) $request->user()->family_id,
+            taskId: (string) $model->id,
+            action: 'assigned',
+            status: $model->status,
+            title: $model->title,
+            assigneeId: $model->assigned_to !== null ? (int) $model->assigned_to : null,
+            actorId: (int) $request->user()->id,
+        ));
 
         return response()->json(['data' => $model]);
     }

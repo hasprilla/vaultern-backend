@@ -23,8 +23,10 @@ use App\Services\PlanFeatureService;
 use App\Services\SubscriptionBillingService;
 use App\Support\NotificationPreferences;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 
 class ProfileController extends Controller
 {
@@ -53,6 +55,48 @@ class ProfileController extends Controller
 
         return response()->json([
             'message' => 'Perfil actualizado.',
+            'data'    => new UserResource($user->fresh()),
+        ]);
+    }
+
+    public function updateAvatar(Request $request): JsonResponse
+    {
+        $request->validate([
+            'avatar' => ['required', 'image', 'max:5120'],
+        ]);
+
+        $user = $request->user();
+        $previous = $user->avatar;
+        $file = $request->file('avatar');
+
+        if ($file === null) {
+            return response()->json(['message' => 'No se recibió ninguna imagen.'], 422);
+        }
+
+        $path = $file->store('avatars/'.$user->id, 'public');
+        $user->update(['avatar' => $path]);
+
+        if (is_string($previous)
+            && $previous !== ''
+            && ! str_starts_with($previous, 'http://')
+            && ! str_starts_with($previous, 'https://')
+            && $previous !== $path
+        ) {
+            Storage::disk('public')->delete($previous);
+        }
+
+        if ($user->family_id !== null) {
+            $this->notifications->notifyFamily(
+                $user,
+                'profile_updated',
+                'Foto de perfil actualizada',
+                "{$user->name} cambió su foto de perfil",
+                ['entity_type' => 'user', 'entity_id' => (string) $user->id],
+            );
+        }
+
+        return response()->json([
+            'message' => 'Foto de perfil actualizada.',
             'data'    => new UserResource($user->fresh()),
         ]);
     }

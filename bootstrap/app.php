@@ -24,6 +24,10 @@ return Application::configure(basePath: dirname(__DIR__))
             Route::get('/up', fn () => response()->json(['status' => 'up']));
         },
     )
+    ->withBroadcasting(
+        __DIR__.'/../routes/channels.php',
+        ['middleware' => ['api', 'api.auth'], 'prefix' => 'api'],
+    )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
             'api.auth' => \App\Http\Middleware\ApiAuthenticate::class,
@@ -42,4 +46,12 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withSchedule(function (\Illuminate\Console\Scheduling\Schedule $schedule): void {
         $schedule->command('subscriptions:renew')->dailyAt('02:00');
+
+        // cPanel: sin supervisor/Redis. Cron cada minuto → schedule:run
+        // procesa la cola MySQL y sale (compatible con shared hosting).
+        if (config('queue.default') === 'database') {
+            $schedule->command('queue:work database --stop-when-empty --tries=3 --max-time=50')
+                ->everyMinute()
+                ->withoutOverlapping(5);
+        }
     })->create();

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\Family;
 
+use App\Events\JoinRequestChanged;
 use App\Models\Family;
 use App\Models\FamilyJoinRequest;
 use App\Models\FamilyMember;
@@ -43,7 +44,7 @@ class FamilyJoinRequestService
             throw ValidationException::withMessages(['email' => 'Ya hay una solicitud pendiente con este email.']);
         }
 
-        return FamilyJoinRequest::query()->create([
+        $joinRequest = FamilyJoinRequest::query()->create([
             'id' => (string) Str::uuid(),
             'family_id' => $family->id,
             'invited_by_user_id' => $inviter->id,
@@ -53,6 +54,18 @@ class FamilyJoinRequestService
             'role' => $role,
             'status' => 'pending',
         ]);
+
+        event(new JoinRequestChanged(
+            familyId: (string) $family->id,
+            requestId: (string) $joinRequest->id,
+            action: 'created',
+            status: 'pending',
+            applicantName: $name,
+            applicantEmail: $email,
+            actorId: (int) $inviter->id,
+        ));
+
+        return $joinRequest;
     }
 
     public function approve(FamilyJoinRequest $request, User $approver): User
@@ -92,6 +105,16 @@ class FamilyJoinRequestService
 
         $request->update(['status' => 'approved']);
 
+        event(new JoinRequestChanged(
+            familyId: (string) $request->family_id,
+            requestId: (string) $request->id,
+            action: 'approved',
+            status: 'approved',
+            applicantName: $request->name,
+            applicantEmail: $request->email,
+            actorId: (int) $approver->id,
+        ));
+
         return $user;
     }
 
@@ -110,5 +133,15 @@ class FamilyJoinRequestService
         }
 
         $request->update(['status' => 'rejected']);
+
+        event(new JoinRequestChanged(
+            familyId: (string) $request->family_id,
+            requestId: (string) $request->id,
+            action: 'rejected',
+            status: 'rejected',
+            applicantName: $request->name,
+            applicantEmail: $request->email,
+            actorId: (int) $approver->id,
+        ));
     }
 }
