@@ -143,7 +143,7 @@ class MercadoPagoCheckoutService
             }
 
             $preferenceId = (string) ($preference['id'] ?? '');
-            $checkoutUrl = $this->client->usesTestCredentials()
+            $checkoutUrl = $this->client->usesSandboxCheckout()
                 ? (string) ($preference['sandbox_init_point'] ?? $preference['init_point'] ?? '')
                 : (string) ($preference['init_point'] ?? $preference['sandbox_init_point'] ?? '');
 

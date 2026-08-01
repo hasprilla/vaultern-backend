@@ -52,11 +52,22 @@ class MercadoPagoClient
         return is_array($results) ? array_values(array_filter($results, 'is_array')) : [];
     }
 
-    public function usesTestCredentials(): bool
+    /** Checkout sandbox: flag explícita o token TEST- (en CO las keys de prueba suelen ser APP_USR-). */
+    public function usesSandboxCheckout(): bool
     {
+        if ((bool) config('mercadopago.sandbox')) {
+            return true;
+        }
+
         $token = (string) config('mercadopago.access_token');
 
         return str_starts_with($token, 'TEST-');
+    }
+
+    /** @deprecated usar usesSandboxCheckout() */
+    public function usesTestCredentials(): bool
+    {
+        return $this->usesSandboxCheckout();
     }
 
     /**

@@ -6,7 +6,8 @@ Checkout oficial de Mercado Pago vía WebView en Flutter. Los cobros reales usan
 
 ```env
 MERCADOPAGO_ENABLED=true
-MERCADOPAGO_ACCESS_TOKEN=APP_USR-...
+MERCADOPAGO_SANDBOX=true          # true = sandbox_init_point + tarjetas APRO
+MERCADOPAGO_ACCESS_TOKEN=APP_USR-...   # pestaña Prueba (en CO no siempre es TEST-)
 MERCADOPAGO_PUBLIC_KEY=APP_USR-...
 MERCADOPAGO_WEBHOOK_SECRET=   # opcional
 ```
