@@ -143,7 +143,9 @@ class MercadoPagoCheckoutService
             }
 
             $preferenceId = (string) ($preference['id'] ?? '');
-            $checkoutUrl = (string) ($preference['init_point'] ?? $preference['sandbox_init_point'] ?? '');
+            $checkoutUrl = $this->client->usesTestCredentials()
+                ? (string) ($preference['sandbox_init_point'] ?? $preference['init_point'] ?? '')
+                : (string) ($preference['init_point'] ?? $preference['sandbox_init_point'] ?? '');
 
             if ($preferenceId === '' || $checkoutUrl === '') {
                 $payment->update([
@@ -173,6 +175,54 @@ class MercadoPagoCheckoutService
                 'payment' => $payment->fresh(['events']),
             ];
         });
+    }
+
+    /**
+     * Consulta MP por external_reference y actualiza el pago local (útil si el webhook no llega).
+     *
+     * @return array{status: string, payment: SubscriptionPayment, synced: bool}
+     */
+    public function syncPayment(SubscriptionPayment $payment): array
+    {
+        if (! $this->client->isConfigured()) {
+            return ['status' => $payment->status, 'payment' => $payment, 'synced' => false];
+        }
+
+        if ($payment->status === 'succeeded') {
+            return ['status' => $payment->status, 'payment' => $payment->fresh(['events']), 'synced' => true];
+        }
+
+        $results = $this->client->searchPaymentsByExternalReference($payment->id);
+        if ($results === []) {
+            $this->logEvent($payment, $payment->user, 'mp_sync_empty', 'Sin pagos en Mercado Pago para esta referencia');
+
+            return ['status' => $payment->status, 'payment' => $payment->fresh(['events']), 'synced' => false];
+        }
+
+        // Preferir approved; si no, el más reciente.
+        usort($results, function (array $a, array $b): int {
+            $rank = static fn (array $p): int => match (strtolower((string) ($p['status'] ?? ''))) {
+                'approved' => 0,
+                'in_process', 'pending', 'authorized' => 1,
+                default => 2,
+            };
+
+            return $rank($a) <=> $rank($b);
+        });
+
+        $mpPayment = $results[0];
+        $mpPaymentId = (string) ($mpPayment['id'] ?? '');
+        $status = strtolower((string) ($mpPayment['status'] ?? ''));
+
+        if ($mpPaymentId === '') {
+            return ['status' => $payment->status, 'payment' => $payment->fresh(['events']), 'synced' => false];
+        }
+
+        $this->applyMercadoPagoStatus($payment, $mpPayment, $status, $mpPaymentId);
+
+        $fresh = $payment->fresh(['events']);
+
+        return ['status' => (string) $fresh?->status, 'payment' => $fresh, 'synced' => true];
     }
 
     /**
@@ -209,7 +259,17 @@ class MercadoPagoCheckoutService
             return;
         }
 
-        $mpPayment = $this->client->getPayment($mpPaymentId);
+        try {
+            $mpPayment = $this->client->getPayment($mpPaymentId);
+        } catch (RuntimeException $e) {
+            Log::warning('mp.webhook.get_payment_failed', [
+                'mp_payment_id' => $mpPaymentId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return;
+        }
+
         $externalRef = (string) ($mpPayment['external_reference'] ?? '');
         $status = strtolower((string) ($mpPayment['status'] ?? ''));
 

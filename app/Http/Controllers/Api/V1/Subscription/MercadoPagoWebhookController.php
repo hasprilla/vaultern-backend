@@ -30,9 +30,8 @@ class MercadoPagoWebhookController extends Controller
                 'message' => $e->getMessage(),
             ]);
 
-            // MP reintenta si no es 2xx; devolvemos 200 tras log para evitar loops
-            // solo si fue error de parseo; si fue error de API MP, 500 para reintento.
-            return response()->json(['ok' => false], 500);
+            // 200 para no saturar reintentos de MP ante ids inválidos / ruido.
+            return response()->json(['ok' => false, 'error' => 'logged']);
         }
 
         return response()->json(['ok' => true]);

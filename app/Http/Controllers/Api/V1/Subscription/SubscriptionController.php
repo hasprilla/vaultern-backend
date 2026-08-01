@@ -175,12 +175,54 @@ class SubscriptionController extends Controller
         ], 201);
     }
 
+    /** Sincroniza estado del pago con Mercado Pago (fallback si no llega el webhook). */
+    public function syncMercadoPagoPayment(Request $request, SubscriptionPayment $payment): JsonResponse
+    {
+        $family = $this->resolveFamily($request);
+        if ($family === null || $payment->family_id !== $family->id) {
+            return response()->json(['message' => 'No autorizado'], 403);
+        }
+
+        if ($payment->provider !== 'mercadopago') {
+            return response()->json(['message' => 'Pago no es de Mercado Pago'], 422);
+        }
+
+        $result = $this->mpCheckoutService->syncPayment($payment);
+
+        return response()->json([
+            'data' => [
+                'synced' => $result['synced'],
+                'status' => $result['status'],
+                'payment' => $result['payment'],
+            ],
+        ]);
+    }
+
     /** Página de retorno para WebView tras Checkout Pro. */
     public function mercadoPagoReturn(Request $request): Response
     {
         $resultRaw = (string) $request->query('result', 'pending');
         $result = in_array($resultRaw, ['success', 'failure', 'pending'], true) ? $resultRaw : 'pending';
-        $paymentId = e((string) $request->query('payment_id', ''));
+        $paymentIdRaw = (string) $request->query('payment_id', '');
+        $paymentId = e($paymentIdRaw);
+
+        // Al volver del checkout, intentar sincronizar (webhook puede tardar o fallar).
+        if ($paymentIdRaw !== '') {
+            $local = SubscriptionPayment::query()->find($paymentIdRaw);
+            if ($local !== null && $local->provider === 'mercadopago') {
+                try {
+                    $synced = $this->mpCheckoutService->syncPayment($local);
+                    if (($synced['status'] ?? '') === 'succeeded') {
+                        $result = 'success';
+                    } elseif (($synced['status'] ?? '') === 'failed') {
+                        $result = 'failure';
+                    }
+                } catch (\Throwable) {
+                    // La página de retorno no debe romper aunque falle el sync.
+                }
+            }
+        }
+
         $title = match ($result) {
             'success' => 'Pago aprobado',
             'failure' => 'Pago no completado',

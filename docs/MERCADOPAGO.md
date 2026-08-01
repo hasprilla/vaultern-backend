@@ -19,6 +19,7 @@ Solo en `.env` / cPanel. Nunca en git.
 |--------|------|------|
 | GET | `/api/v1/subscriptions/checkout-config` | sí |
 | POST | `/api/v1/subscriptions/checkout/mp` | sí |
+| POST | `/api/v1/subscriptions/payments/{id}/mp-sync` | sí |
 | POST | `/api/v1/webhooks/mercadopago` | no |
 | GET | `/api/v1/subscriptions/mp/return` | no |
 
@@ -38,5 +39,9 @@ Solo en `.env` / cPanel. Nunca en git.
 
 - Planes del catálogo en **COP**.
 - `back_urls` y `notification_url` usan `APP_URL` (debe ser HTTPS en producción).
-- Credenciales `APP_USR` son de **producción**: los cobros son reales. Para sandbox usa keys `TEST-…` y usuario de prueba.
+- Credenciales `APP_USR` son de **producción**: los cobros son reales.
+- **Tarjetas de prueba (APRO / OTHE / …) no aprueban con `APP_USR`.** Para QA sin cobro real:
+  1. En cPanel pon Access Token + Public Key `TEST-…` de la app.
+  2. Inicia sesión en Checkout Pro con un **usuario comprador de prueba**.
+  3. Usa tarjeta `4013 5406 8274 6260`, titular `APRO`, doc `123456789`, CVV `123`, vence `11/30`.
 - Tras el WebView, la app refresca plan + historial; la activación definitiva llega por webhook.

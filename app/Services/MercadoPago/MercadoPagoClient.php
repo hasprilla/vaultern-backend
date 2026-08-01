@@ -34,10 +34,37 @@ class MercadoPagoClient
     }
 
     /**
+     * Busca pagos por external_reference (nuestro SubscriptionPayment id).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function searchPaymentsByExternalReference(string $externalReference): array
+    {
+        $json = $this->request('GET', '/v1/payments/search', null, [
+            'external_reference' => $externalReference,
+            'sort' => 'date_created',
+            'criteria' => 'desc',
+            'limit' => 10,
+        ]);
+
+        $results = $json['results'] ?? [];
+
+        return is_array($results) ? array_values(array_filter($results, 'is_array')) : [];
+    }
+
+    public function usesTestCredentials(): bool
+    {
+        $token = (string) config('mercadopago.access_token');
+
+        return str_starts_with($token, 'TEST-');
+    }
+
+    /**
      * @param  array<string, mixed>|null  $body
+     * @param  array<string, mixed>  $query
      * @return array<string, mixed>
      */
-    private function request(string $method, string $path, ?array $body = null): array
+    private function request(string $method, string $path, ?array $body = null, array $query = []): array
     {
         $token = (string) config('mercadopago.access_token');
         if ($token === '') {
@@ -45,6 +72,9 @@ class MercadoPagoClient
         }
 
         $url = config('mercadopago.api_base').$path;
+        if ($query !== []) {
+            $url .= (str_contains($url, '?') ? '&' : '?').http_build_query($query);
+        }
 
         $pending = Http::withToken($token)
             ->acceptJson()

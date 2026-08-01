@@ -127,6 +127,7 @@ Route::prefix('v1')->middleware(['api.auth', 'tenant'])->group(function () {
     Route::get('/subscriptions/payments/{payment}', [SubscriptionController::class, 'showPayment']);
     Route::post('/subscriptions/checkout', [SubscriptionController::class, 'checkout']);
     Route::post('/subscriptions/checkout/mp', [SubscriptionController::class, 'checkoutMercadoPago']);
+    Route::post('/subscriptions/payments/{payment}/mp-sync', [SubscriptionController::class, 'syncMercadoPagoPayment']);
     Route::post('/subscriptions/cancel', [SubscriptionController::class, 'cancel']);
     Route::post('/subscriptions/resume', [SubscriptionController::class, 'resume']);
 
