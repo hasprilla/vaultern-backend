@@ -1,33 +1,46 @@
-.PHONY: build up down logs shell migrate seed fresh artisan test
+.PHONY: build up down logs shell migrate seed fresh artisan test redis-cli up-realtime docs-docker
 
-# Docker compose shortcuts
+COMPOSE=docker compose -f docker/docker-compose.yml --env-file .env.docker
+
 build:
-	docker compose -f docker/docker-compose.yml build
+	$(COMPOSE) build
 
 up:
-	docker compose -f docker/docker-compose.yml up -d
+	@test -f .env.docker || cp docker/.env.docker.example .env.docker
+	$(COMPOSE) up --build -d
+	@echo ""
+	@echo "API:   http://127.0.0.1:8000/api/v1/health"
+	@echo "Queue: redis  |  Scheduler: schedule:work"
+	@echo "Seed:  make seed"
+
+up-realtime:
+	@test -f .env.docker || cp docker/.env.docker.example .env.docker
+	BROADCAST_CONNECTION=reverb $(COMPOSE) --profile realtime up --build -d
+	@echo "Reverb ws://127.0.0.1:8080"
 
 down:
-	docker compose -f docker/docker-compose.yml down
+	$(COMPOSE) down
 
 logs:
-	docker compose -f docker/docker-compose.yml logs -f
+	$(COMPOSE) logs -f
 
 shell:
-	docker compose -f docker/docker-compose.yml exec app /bin/sh
+	$(COMPOSE) exec app /bin/sh
 
-# Laravel shortcuts inside the container
 migrate:
-	docker compose -f docker/docker-compose.yml exec app php artisan migrate
+	$(COMPOSE) exec app php artisan migrate --force
 
 seed:
-	docker compose -f docker/docker-compose.yml exec app php artisan db:seed
+	$(COMPOSE) exec app php artisan db:seed --class=DemoHhUserSeeder --force
 
 fresh:
-	docker compose -f docker/docker-compose.yml exec app php artisan migrate:fresh --seed
+	$(COMPOSE) exec app php artisan migrate:fresh --seed --force
 
 artisan:
-	docker compose -f docker/docker-compose.yml exec app php artisan $(CMD)
+	$(COMPOSE) exec app php artisan $(CMD)
 
 test:
-	docker compose -f docker/docker-compose.yml exec app php artisan test
+	$(COMPOSE) exec app php artisan test
+
+redis-cli:
+	$(COMPOSE) exec redis redis-cli ping

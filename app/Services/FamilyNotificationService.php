@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\Jobs\NotifyFamilyJob;
 use App\Models\Family;
+use App\Models\FamilyMember;
 use App\Models\User;
 
 class FamilyNotificationService
@@ -48,10 +49,17 @@ class FamilyNotificationService
         }
 
         $parentIds = User::query()
-            ->where('family_id', $actor->family_id)
-            ->where('id', '!=', $actor->id)
-            ->whereIn('role', ['padre', 'madre'])
-            ->pluck('id')
+            ->where('users.family_id', $actor->family_id)
+            ->where('users.id', '!=', $actor->id)
+            ->whereIn('users.role', ['padre', 'madre'])
+            ->whereExists(function ($query) use ($actor) {
+                $query->selectRaw('1')
+                    ->from('family_members')
+                    ->whereColumn('family_members.user_id', 'users.id')
+                    ->where('family_members.family_id', $actor->family_id)
+                    ->where('family_members.status', 'active');
+            })
+            ->pluck('users.id')
             ->all();
 
         $this->enqueue($actor->family_id, (int) $actor->id, $parentIds, $type, $title, $body, $data);
@@ -135,11 +143,19 @@ class FamilyNotificationService
         ?array $onlyUserIds = null,
     ): void {
         if ($onlyUserIds === null) {
-            $query = User::query()->where('family_id', $familyId);
+            $query = User::query()
+                ->where('users.family_id', $familyId)
+                ->whereExists(function ($sub) use ($familyId) {
+                    $sub->selectRaw('1')
+                        ->from('family_members')
+                        ->whereColumn('family_members.user_id', 'users.id')
+                        ->where('family_members.family_id', $familyId)
+                        ->where('family_members.status', 'active');
+                });
             if ($excludeUserId !== null) {
-                $query->where('id', '!=', $excludeUserId);
+                $query->where('users.id', '!=', $excludeUserId);
             }
-            $onlyUserIds = $query->pluck('id')->all();
+            $onlyUserIds = $query->pluck('users.id')->all();
         }
 
         if ($onlyUserIds === []) {
@@ -163,6 +179,20 @@ class FamilyNotificationService
         array $data,
     ): void {
         $ids = array_values(array_unique(array_map('intval', $recipientIds)));
+        if ($ids === []) {
+            return;
+        }
+
+        // Nunca notificar a padres/madres con membresía desactivada (datos se conservan).
+        $ids = FamilyMember::query()
+            ->where('family_id', $familyId)
+            ->where('status', 'active')
+            ->whereIn('user_id', $ids)
+            ->pluck('user_id')
+            ->map(fn ($id) => (int) $id)
+            ->values()
+            ->all();
+
         if ($ids === []) {
             return;
         }

@@ -68,6 +68,8 @@ Route::prefix('v1')->middleware(['api.auth', 'tenant'])->group(function () {
     Route::post('/families/{family}/join-requests/{joinRequest}/approve', [FamilyController::class, 'approveJoinRequest']);
     Route::post('/families/{family}/join-requests/{joinRequest}/reject', [FamilyController::class, 'rejectJoinRequest']);
     Route::post('/families/{family}/members/{member}/role', [FamilyController::class, 'assignRole']);
+    Route::post('/families/{family}/members/{member}/deactivate', [FamilyController::class, 'deactivateMember']);
+    Route::post('/families/{family}/members/{member}/reactivate', [FamilyController::class, 'reactivateMember']);
     Route::get('/families/{family}/messages', [ParentMessageController::class, 'index']);
     Route::post('/families/{family}/messages', [ParentMessageController::class, 'store']);
     Route::patch('/families/{family}/messages/{message}/read', [ParentMessageController::class, 'markRead']);

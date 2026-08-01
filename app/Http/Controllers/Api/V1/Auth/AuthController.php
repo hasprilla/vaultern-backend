@@ -82,6 +82,11 @@ class AuthController extends Controller
             'family_id' => $family->id,
         ]);
 
+        // Dueño de la membresía = quien registra el núcleo (si la columna ya existe).
+        if (\App\Support\SchemaCompat::hasColumn('families', 'owner_user_id')) {
+            $family->update(['owner_user_id' => $user->id]);
+        }
+
         FamilyMember::query()->create([
             'id'        => (string) Str::uuid(),
             'family_id' => $family->id,
@@ -274,6 +279,13 @@ class AuthController extends Controller
 
         if ($user->trashed() || $user->account_status === 'deleted') {
             return response()->json(['message' => 'Esta cuenta fue eliminada.'], 403);
+        }
+
+        if (! $user->hasActiveFamilyMembership()) {
+            return response()->json([
+                'message' => 'Tu acceso a este núcleo familiar fue desactivado por el dueño de la membresía. Contacta al dueño para reactivarlo.',
+                'code'    => 'family_membership_inactive',
+            ], 403);
         }
 
         if ($request->validated('device_id')) {

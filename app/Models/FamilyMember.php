@@ -40,4 +40,9 @@ class FamilyMember extends Model
     {
         return $this->belongsTo(User::class);
     }
+
+    public function isActive(): bool
+    {
+        return $this->status === 'active';
+    }
 }

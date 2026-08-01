@@ -1,61 +1,62 @@
 # Vaultern — Zumifly API Backend
 
-API REST para Zumifly Family Hub. **Target de producción: cPanel** (MySQL + file cache + cola `database` + FCM).
+API REST para Zumifly Family Hub.
 
-## Stack real
+| Entorno | Cache / Cola | Realtime | Notas |
+|---|---|---|---|
+| **cPanel (prod actual)** | file + MySQL `jobs` | FCM (`BROADCAST=log`) | `https://apivaulternbackend.haaspes.space` |
+| **Docker local / Railway** | Redis | FCM (+ Reverb opcional) | Evolución futura |
 
-| Pieza | Producción (cPanel) | Local opcional |
-|---|---|---|
-| Framework | Laravel 13 / PHP 8.3+ | igual |
-| DB | MySQL | SQLite o MySQL |
-| Cache / sesión | `file` / `cookie` | `file` |
-| Cola | `database` + cron `schedule:run` | `queue:work` |
-| Push | Firebase FCM | FCM off |
-| WebSockets | **No** (`BROADCAST_CONNECTION=log`) | Reverb opcional |
-| Redis / Horizon | **No** | no usar |
+## Stack
 
-## Deploy cPanel (resumen)
+- Laravel 13 / PHP 8.3+
+- MySQL 8
+- Redis 7 (Docker/Railway)
+- Cola: `redis` (Docker/Railway) o `database` (cPanel)
+- Push: Firebase FCM
+- WebSockets: Laravel Reverb **opcional** (perfil `realtime`)
 
-1. Copiar `.env.cpanel.example` → `.env` y completar credenciales.
-2. `composer install --no-dev --optimize-autoloader`
+Auth: tokens propios (`TokenService` / `api_tokens`), no Sanctum de sesión.
+
+---
+
+## Docker local (espejo Railway)
+
+```bash
+cd vaultern-backend
+cp docker/.env.docker.example .env.docker
+make up
+make seed   # hh@yopmail.com / password
+curl -s http://127.0.0.1:8000/api/v1/health
+```
+
+Servicios: `app`, `mysql`, `redis`, `queue`, `scheduler`.
+
+Realtime WS local:
+
+```bash
+make up-realtime
+```
+
+Guía Railway: [docs/RAILWAY.md](docs/RAILWAY.md)
+
+---
+
+## cPanel (sin Redis)
+
+1. `.env.cpanel.example` → `.env`
+2. `composer install --no-dev --optimize-autoloader` (o vendor trackeado)
 3. `php artisan migrate --force`
-4. `chmod -R 775 storage bootstrap/cache`
-5. Cron cada minuto:
-   ```
-   cd /home/USER/ruta/vaultern-backend && /usr/local/bin/php artisan schedule:run >> /dev/null 2>&1
-   ```
-6. Subir `storage/app/firebase-credentials.json` y `FIREBASE_FCM_ENABLED=true`.
+4. Cron cada minuto: `php artisan schedule:run`
+5. `QUEUE_CONNECTION=database`, `CACHE_STORE=file`, `BROADCAST_CONNECTION=log`
+6. Hotfix Home/Familia: `bash scripts/cpanel-migrate-hotfix.sh`
 
-Con eso: notificaciones DB + FCM y jobs (`NotifyFamilyJob`, school broadcast) salen por la cola MySQL. **No hace falta Redis ni Reverb en cPanel.**
-
-## Local
-
-```bash
-cp .env.example .env
-php artisan key:generate
-php artisan migrate
-php artisan serve
-# Cola (si QUEUE_CONNECTION=database):
-php artisan queue:work database --tries=3
-```
-
-Realtime WebSocket (solo local, opcional):
-
-```bash
-# .env → BROADCAST_CONNECTION=reverb + keys REVERB_*
-php artisan reverb:start
-# Docker con perfil:
-docker compose --profile realtime up -d
-```
-
-App Flutter en producción: `--dart-define=REALTIME_ENABLED=false` (por defecto fuera de API local). Sync en vivo = FCM + pull/resync.
+---
 
 ## API
 
-Prefijo: `/api/v1` — auth Bearer (tokens propios, no Sanctum de sesión).
+Prefijo: `/api/v1` — Bearer token.
 
 Health: `GET /api/v1/health`
-
----
 
 **Frontend:** [zumifly-flutter](https://github.com/hasprilla/zumifly-flutter)

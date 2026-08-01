@@ -33,6 +33,13 @@ class ApiAuthenticate
             ], 403);
         }
 
+        if (! $user->hasActiveFamilyMembership()) {
+            return response()->json([
+                'message' => 'Tu acceso a este núcleo familiar fue desactivado por el dueño de la membresía.',
+                'code'    => 'family_membership_inactive',
+            ], 403);
+        }
+
         Auth::setUser($user);
 
         return $next($request);

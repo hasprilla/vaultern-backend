@@ -4,6 +4,7 @@
 .env.*
 !.env.example
 !.env.cpanel.example
+!.env.railway.example
 !.env.testing
 *.log
 /storage/app/ocr/*

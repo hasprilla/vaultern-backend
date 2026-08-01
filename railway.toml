@@ -1,0 +1,17 @@
+# Railway: un servicio por rol (mismo Dockerfile, distinto start).
+# 1) web   → Start: web
+# 2) worker → Start: worker
+# 3) scheduler → Start: scheduler
+# Plugins: MySQL + Redis. Variables: ver .env.railway.example
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "docker/Dockerfile"
+# En Railway usa target production (default final stage si se especifica)
+watchPatterns = ["app/**", "routes/**", "config/**", "database/**", "composer.lock", "docker/**"]
+
+[deploy]
+healthcheckPath = "/api/v1/health"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5

@@ -6,6 +6,7 @@ namespace App\Models;
 
 use App\Domains\Family\Entities\FamilyRole;
 use App\Support\NotificationPreferences;
+use App\Support\SchemaCompat;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -96,16 +97,58 @@ class User extends Authenticatable
         return $this->guardedChildren()->where('child_user_id', $childUserId)->exists();
     }
 
+    /** Cache request-scoped para evitar doble query en middleware. */
+    private ?bool $activeFamilyMembershipCache = null;
+
+    private ?bool $isFamilyOwnerCache = null;
+
     /** Dueño de la membresía/familia: ve toda la información y otorga permisos de visibilidad. */
     public function isFamilyOwner(): bool
     {
-        if ($this->family_id === null) {
-            return false;
+        if ($this->isFamilyOwnerCache !== null) {
+            return $this->isFamilyOwnerCache;
         }
 
-        return Family::query()
+        if ($this->family_id === null) {
+            return $this->isFamilyOwnerCache = false;
+        }
+
+        // Compat cPanel: columna puede no existir hasta correr migrate.
+        if (! SchemaCompat::hasColumn('families', 'owner_user_id')) {
+            $firstParentId = self::query()
+                ->where('family_id', $this->family_id)
+                ->whereIn('role', ['padre', 'madre'])
+                ->orderBy('id')
+                ->value('id');
+
+            return $this->isFamilyOwnerCache = (int) $firstParentId === (int) $this->id;
+        }
+
+        return $this->isFamilyOwnerCache = Family::query()
             ->where('id', $this->family_id)
             ->where('owner_user_id', $this->id)
+            ->exists();
+    }
+
+    /** Membresía activa en su núcleo familiar actual (sin borrar datos al desactivar). */
+    public function hasActiveFamilyMembership(): bool
+    {
+        if ($this->activeFamilyMembershipCache !== null) {
+            return $this->activeFamilyMembershipCache;
+        }
+
+        if ($this->family_id === null || $this->bypassesFamilyTenant()) {
+            return $this->activeFamilyMembershipCache = true;
+        }
+
+        if (! SchemaCompat::hasTable('family_members')) {
+            return $this->activeFamilyMembershipCache = true;
+        }
+
+        return $this->activeFamilyMembershipCache = FamilyMember::query()
+            ->where('user_id', $this->id)
+            ->where('family_id', $this->family_id)
+            ->where('status', 'active')
             ->exists();
     }
 

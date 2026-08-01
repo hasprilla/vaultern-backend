@@ -27,6 +27,11 @@ trait AuthenticatesUsers
             ...$userAttrs,
         ]);
 
+        if ($family->owner_user_id === null) {
+            $family->update(['owner_user_id' => $user->id]);
+            $family->refresh();
+        }
+
         FamilyMember::query()->create([
             'id'        => (string) Str::uuid(),
             'family_id' => $family->id,

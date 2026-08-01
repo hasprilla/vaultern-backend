@@ -31,6 +31,14 @@ class EmailVerificationService
 
         $this->fcm->sendVerificationCode($user, $code);
 
+        // Docker/local: sin FCM/SMTP reales el OTP solo queda en logs.
+        if (app()->environment(['local', 'testing']) || (bool) config('app.debug')) {
+            Log::info('OTP verificación (dev)', [
+                'email' => $user->email,
+                'code'  => $code,
+            ]);
+        }
+
         try {
             Mail::to($user->email)->send(new VerifyEmailMail($user->name, $code));
         } catch (\Throwable $e) {

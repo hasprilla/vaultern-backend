@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\Models\ChildGuardian;
 use App\Models\User;
+use App\Support\SchemaCompat;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -18,6 +19,12 @@ class ChildGuardianService
     {
         if ($child->role !== 'hijo' || $child->family_id === null) {
             throw ValidationException::withMessages(['child' => 'Usuario no es un hijo válido.']);
+        }
+
+        if (! SchemaCompat::hasTable('child_guardians')) {
+            throw ValidationException::withMessages([
+                'guardian_ids' => 'La custodia aún no está disponible. Ejecuta las migraciones pendientes en el servidor.',
+            ]);
         }
 
         $ids = array_values(array_unique(array_map('intval', $parentIds)));
@@ -64,14 +71,18 @@ class ChildGuardianService
             return [];
         }
 
-        // El dueño de la membresía ve todos los hijos del núcleo.
-        if ($parent->isFamilyOwner() && $parent->family_id !== null) {
-            return User::query()
-                ->where('family_id', $parent->family_id)
-                ->where('role', 'hijo')
-                ->pluck('id')
-                ->map(fn ($id) => (int) $id)
-                ->all();
+        if ($parent->family_id === null) {
+            return [];
+        }
+
+        // Dueño (o fallback pre-migración) ve todos los hijos.
+        if ($parent->isFamilyOwner()) {
+            return $this->allChildIdsInFamily($parent->family_id);
+        }
+
+        // Compat cPanel: sin tabla, todos los padres ven a todos los hijos del núcleo.
+        if (! SchemaCompat::hasTable('child_guardians')) {
+            return $this->allChildIdsInFamily($parent->family_id);
         }
 
         return ChildGuardian::query()
@@ -84,6 +95,19 @@ class ChildGuardianService
     /** @return list<int> */
     public function parentIdsFor(User $child): array
     {
+        if (! SchemaCompat::hasTable('child_guardians')) {
+            if ($child->family_id === null) {
+                return [];
+            }
+
+            return User::query()
+                ->where('family_id', $child->family_id)
+                ->whereIn('role', ['padre', 'madre', 'tutor'])
+                ->pluck('id')
+                ->map(fn ($id) => (int) $id)
+                ->all();
+        }
+
         return ChildGuardian::query()
             ->where('child_user_id', $child->id)
             ->pluck('parent_user_id')
@@ -101,6 +125,14 @@ class ChildGuardianService
                 ->exists();
         }
 
+        if (! SchemaCompat::hasTable('child_guardians')) {
+            return User::query()
+                ->where('id', $childId)
+                ->where('family_id', $parent->family_id)
+                ->where('role', 'hijo')
+                ->exists();
+        }
+
         return ChildGuardian::query()
             ->where('parent_user_id', $parent->id)
             ->where('child_user_id', $childId)
@@ -110,9 +142,34 @@ class ChildGuardianService
     /** @return list<int> */
     public function guardianIdsOfChild(int $childId): array
     {
+        if (! SchemaCompat::hasTable('child_guardians')) {
+            $child = User::query()->find($childId);
+            if ($child === null || $child->family_id === null) {
+                return [];
+            }
+
+            return User::query()
+                ->where('family_id', $child->family_id)
+                ->whereIn('role', ['padre', 'madre', 'tutor'])
+                ->pluck('id')
+                ->map(fn ($id) => (int) $id)
+                ->all();
+        }
+
         return ChildGuardian::query()
             ->where('child_user_id', $childId)
             ->pluck('parent_user_id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+    }
+
+    /** @return list<int> */
+    private function allChildIdsInFamily(string $familyId): array
+    {
+        return User::query()
+            ->where('family_id', $familyId)
+            ->where('role', 'hijo')
+            ->pluck('id')
             ->map(fn ($id) => (int) $id)
             ->all();
     }

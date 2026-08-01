@@ -10,14 +10,17 @@ use App\Http\Requests\Api\V1\Family\CreateFamilyRequest;
 use App\Http\Requests\Api\V1\Family\InviteMemberRequest;
 use App\Http\Requests\Api\V1\Family\RegisterChildRequest;
 use App\Http\Resources\Api\V1\UserResource;
+use App\Infrastructure\Auth\TokenService;
 use App\Models\Family;
 use App\Models\FamilyJoinRequest;
 use App\Models\FamilyMember;
 use App\Models\User;
 use App\Services\ChildGuardianService;
 use App\Services\FamilyNotificationService;
+use App\Support\SchemaCompat;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
@@ -28,17 +31,37 @@ class FamilyController extends Controller
         private readonly FamilyNotificationService $notifications,
         private readonly ChildGuardianService $guardians,
         private readonly \App\Services\PlanFeatureService $planFeatures,
+        private readonly TokenService $tokens,
     ) {}
 
     public function index(Request $request): JsonResponse
     {
         $viewer = $request->user();
         $family = Family::query()->findOrFail($viewer->family_id);
-        $members = FamilyMember::query()
-            ->with(['user.guardians'])
-            ->where('family_id', $family->id)
-            ->where('status', 'active')
-            ->get();
+        $isOwner = $family->isOwnedBy($viewer);
+
+        $with = SchemaCompat::hasTable('child_guardians')
+            ? ['user.guardians']
+            : ['user'];
+
+        $membersQuery = FamilyMember::query()
+            ->with($with)
+            ->where('family_id', $family->id);
+
+        if ($isOwner) {
+            // El dueño ve activos + padres/madres desactivados (para poder reactivarlos).
+            $membersQuery->where(function ($query) {
+                $query->where('status', 'active')
+                    ->orWhere(function ($inactive) {
+                        $inactive->where('status', 'inactive')
+                            ->whereIn('role', ['padre', 'madre']);
+                    });
+            });
+        } else {
+            $membersQuery->where('status', 'active');
+        }
+
+        $members = $membersQuery->get();
 
         $myChildIds = $this->guardians->childIdsFor($viewer);
 
@@ -58,8 +81,6 @@ class FamilyController extends Controller
             return in_array((int) $user->id, $myChildIds, true);
         });
 
-        $isOwner = $family->isOwnedBy($viewer);
-
         return response()->json([
             'data' => [
                 'id'             => $family->id,
@@ -68,7 +89,12 @@ class FamilyController extends Controller
                 'invite_code'    => $family->invite_code,
                 'owner_user_id'  => $family->owner_user_id !== null ? (string) $family->owner_user_id : null,
                 'is_owner'       => $isOwner,
-                'members'        => $visible->values()->map(fn (FamilyMember $m) => new UserResource($m->user)),
+                'members'        => $visible->values()->map(function (FamilyMember $m) {
+                    $payload = (new UserResource($m->user))->resolve();
+                    $payload['membership_status'] = $m->status;
+
+                    return $payload;
+                }),
                 'my_child_ids'   => array_map('strval', $myChildIds),
             ],
         ]);
@@ -218,10 +244,21 @@ class FamilyController extends Controller
             'status'    => 'active',
         ]);
 
-        // Solo el dueño de la membresía puede asignar custodios adicionales.
-        $guardianIds = $request->user()->isFamilyOwner()
-            ? array_map('intval', $request->validated('guardian_ids') ?? [])
-            : [];
+        // Solo el dueño de la membresía puede asignar custodios adicionales (activos).
+        $guardianIds = [];
+        if ($request->user()->isFamilyOwner()) {
+            $requested = array_map('intval', $request->validated('guardian_ids') ?? []);
+            if ($requested !== []) {
+                $guardianIds = FamilyMember::query()
+                    ->where('family_id', $family)
+                    ->where('status', 'active')
+                    ->whereIn('role', ['padre', 'madre', 'tutor'])
+                    ->whereIn('user_id', $requested)
+                    ->pluck('user_id')
+                    ->map(fn ($id) => (int) $id)
+                    ->all();
+            }
+        }
         $this->guardians->syncForChild($child, $guardianIds, $request->user());
         $child->load('guardians');
 
@@ -258,6 +295,21 @@ class FamilyController extends Controller
         ]);
 
         $ids = array_map('intval', $validated['guardian_ids']);
+        $activeGuardianIds = FamilyMember::query()
+            ->where('family_id', $family)
+            ->where('status', 'active')
+            ->whereIn('role', ['padre', 'madre', 'tutor'])
+            ->whereIn('user_id', $ids)
+            ->pluck('user_id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        if (count($activeGuardianIds) !== count(array_unique($ids))) {
+            return response()->json([
+                'message' => 'Solo puedes asignar custodios con acceso activo al núcleo familiar.',
+            ], 422);
+        }
+
         $this->guardians->syncForChild($childUser, $ids);
         $childUser->load('guardians');
 
@@ -391,6 +443,12 @@ class FamilyController extends Controller
             ->where('user_id', $member)
             ->firstOrFail();
 
+        if ($membership->status !== 'active') {
+            return response()->json([
+                'message' => 'Reactiva el acceso del miembro antes de cambiar su rol.',
+            ], 422);
+        }
+
         $membership->update(['role' => $validated['role']]);
         User::query()->where('id', $member)->update(['role' => $validated['role']]);
 
@@ -408,6 +466,122 @@ class FamilyController extends Controller
             'data'    => [
                 'member_id' => $member,
                 'new_role'  => $validated['role'],
+            ],
+        ]);
+    }
+
+    /**
+     * El dueño desactiva a un padre/madre sin borrar datos.
+     * Queda sin poder realizar acciones del núcleo familiar hasta reactivación.
+     */
+    public function deactivateMember(Request $request, string $family, string $member): JsonResponse
+    {
+        $this->assertFamilyAccess($request, $family);
+
+        if (! $request->user()->isFamilyOwner()) {
+            return response()->json([
+                'message' => 'Solo el dueño de la membresía puede desactivar a un padre o madre.',
+            ], 403);
+        }
+
+        $familyModel = Family::query()->findOrFail($family);
+        $membership = FamilyMember::query()
+            ->where('family_id', $family)
+            ->where('user_id', $member)
+            ->firstOrFail();
+
+        if (! in_array($membership->role, ['padre', 'madre'], true)) {
+            return response()->json([
+                'message' => 'Solo se puede desactivar a un padre o una madre.',
+            ], 422);
+        }
+
+        if ((int) $familyModel->owner_user_id === (int) $member) {
+            return response()->json([
+                'message' => 'No puedes desactivar al dueño de la membresía.',
+            ], 422);
+        }
+
+        if ((int) $request->user()->id === (int) $member) {
+            return response()->json([
+                'message' => 'No puedes desactivarte a ti mismo desde aquí.',
+            ], 422);
+        }
+
+        if ($membership->status === 'inactive') {
+            return response()->json([
+                'message' => 'Este miembro ya está desactivado.',
+            ], 422);
+        }
+
+        $memberUser = User::query()->findOrFail($member);
+
+        DB::transaction(function () use ($membership, $memberUser) {
+            $membership->update(['status' => 'inactive']);
+            $this->tokens->revoke($memberUser);
+        });
+
+        $this->notifications->notifyFamily(
+            $request->user(),
+            'family_updated',
+            'Acceso desactivado',
+            "{$request->user()->name} desactivó el acceso de {$memberUser->name} al núcleo familiar",
+            ['entity_type' => 'user', 'entity_id' => (string) $member],
+        );
+
+        return response()->json([
+            'message' => 'Acceso desactivado. La información se conserva y puedes reactivarlo cuando quieras.',
+            'data'    => [
+                'member_id'          => (string) $member,
+                'membership_status'  => 'inactive',
+            ],
+        ]);
+    }
+
+    /** El dueño reactiva a un padre/madre previamente desactivado. */
+    public function reactivateMember(Request $request, string $family, string $member): JsonResponse
+    {
+        $this->assertFamilyAccess($request, $family);
+
+        if (! $request->user()->isFamilyOwner()) {
+            return response()->json([
+                'message' => 'Solo el dueño de la membresía puede reactivar a un padre o madre.',
+            ], 403);
+        }
+
+        $membership = FamilyMember::query()
+            ->where('family_id', $family)
+            ->where('user_id', $member)
+            ->firstOrFail();
+
+        if (! in_array($membership->role, ['padre', 'madre'], true)) {
+            return response()->json([
+                'message' => 'Solo se puede reactivar a un padre o una madre.',
+            ], 422);
+        }
+
+        if ($membership->status === 'active') {
+            return response()->json([
+                'message' => 'Este miembro ya tiene acceso activo.',
+            ], 422);
+        }
+
+        $memberUser = User::query()->findOrFail($member);
+        $membership->update(['status' => 'active']);
+
+        $this->notifications->notifyFamily(
+            $request->user(),
+            'family_updated',
+            'Acceso reactivado',
+            "{$request->user()->name} reactivó el acceso de {$memberUser->name} al núcleo familiar",
+            ['entity_type' => 'user', 'entity_id' => (string) $member],
+        );
+
+        return response()->json([
+            'message' => 'Acceso reactivado. La persona ya puede volver a iniciar sesión.',
+            'data'    => [
+                'member_id'         => (string) $member,
+                'membership_status' => 'active',
             ],
         ]);
     }

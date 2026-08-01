@@ -47,8 +47,8 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withSchedule(function (\Illuminate\Console\Scheduling\Schedule $schedule): void {
         $schedule->command('subscriptions:renew')->dailyAt('02:00');
 
-        // cPanel: sin supervisor/Redis. Cron cada minuto → schedule:run
-        // procesa la cola MySQL y sale (compatible con shared hosting).
+        // cPanel (QUEUE_CONNECTION=database): cron cada minuto drena jobs y sale.
+        // Docker/Railway (redis): el servicio `worker` mantiene queue:work; no hace falta esto.
         if (config('queue.default') === 'database') {
             $schedule->command('queue:work database --stop-when-empty --tries=3 --max-time=50')
                 ->everyMinute()

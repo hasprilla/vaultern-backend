@@ -1,48 +1,81 @@
-version: "3.9"
+# Stack local = espejo de Railway:
+#   app (web) + mysql + redis + queue worker + scheduler
+# Realtime opcional:
+#   docker compose --profile realtime up -d
+#
+# Desde la raíz del backend:
+#   docker compose -f docker/docker-compose.yml --env-file .env.docker up --build
 
-# Stack orientado a cPanel: MySQL + cola database + (opcional) Reverb solo en local.
-# Sin Redis / Horizon.
+name: vaultern
 
 services:
   app:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+      target: development
     container_name: vaultern_app
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "${APP_PORT:-8000}:8000"
     volumes:
       - ..:/var/www/html
     depends_on:
       mysql:
         condition: service_healthy
-    environment:
-      - APP_ENV=local
-      - APP_KEY=${APP_KEY:-base64:ZHVtbXlrZXlGb3JMb2NhbERldk9ubHk=}
-      - APP_ALLOW_HTTP=true
-      - DB_CONNECTION=mysql
-      - DB_HOST=mysql
-      - DB_PORT=3306
-      - DB_DATABASE=vaultern_db
-      - DB_USERNAME=vaultern
-      - DB_PASSWORD=${DB_PASSWORD:-secret}
-      - CACHE_STORE=file
-      - SESSION_DRIVER=file
-      - QUEUE_CONNECTION=database
-      - BROADCAST_CONNECTION=${BROADCAST_CONNECTION:-log}
+      redis:
+        condition: service_healthy
+    environment: &laravel_env
+      APP_NAME: Vaultern
+      APP_ENV: local
+      APP_DEBUG: "true"
+      APP_KEY: ${APP_KEY:-base64:ZHVtbXlrZXlGb3JMb2NhbERldk9ubHk=}
+      APP_URL: http://localhost:8000
+      APP_ALLOW_HTTP: "true"
+      LOG_CHANNEL: stderr
+      DB_CONNECTION: mysql
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_DATABASE: vaultern_db
+      DB_USERNAME: vaultern
+      DB_PASSWORD: ${DB_PASSWORD:-secret}
+      REDIS_CLIENT: phpredis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      CACHE_STORE: redis
+      SESSION_DRIVER: redis
+      QUEUE_CONNECTION: redis
+      BROADCAST_CONNECTION: ${BROADCAST_CONNECTION:-log}
+      REVERB_APP_ID: ${REVERB_APP_ID:-vaultern}
+      REVERB_APP_KEY: ${REVERB_APP_KEY:-behblv1hznnbqwpu0cxo}
+      REVERB_APP_SECRET: ${REVERB_APP_SECRET:-c3hsfp4udwzkw2vjcofr}
+      REVERB_HOST: localhost
+      REVERB_PORT: 8080
+      REVERB_SCHEME: http
+      REVERB_SERVER_HOST: 0.0.0.0
+      REVERB_SERVER_PORT: 8080
+      FIREBASE_FCM_ENABLED: ${FIREBASE_FCM_ENABLED:-false}
+    # --no-reload: artisan serve NO pasa DB_*/REDIS_* al worker PHP si existe .env
+    # (whitelist passthrough). Sin este flag, el .env local (sqlite) pisa Docker.
     command: >
       sh -c "composer install --no-interaction &&
-             php artisan key:generate --force --no-interaction || true &&
-             php artisan migrate --force &&
-             php artisan serve --host=0.0.0.0 --port=8000"
+             php artisan config:clear --no-interaction &&
+             php artisan migrate --force --no-interaction &&
+             php artisan serve --host=0.0.0.0 --port=8000 --no-reload"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8000/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
 
   mysql:
     image: mysql:8.0
     container_name: vaultern_mysql
     restart: unless-stopped
     ports:
-      - "3306:3306"
+      - "${MYSQL_PORT:-3306}:3306"
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-secret}
       MYSQL_DATABASE: vaultern_db
@@ -51,61 +84,87 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
 
-  # Equivalente al cron de cPanel: procesa jobs de la tabla `jobs`.
+  redis:
+    image: redis:7-alpine
+    container_name: vaultern_redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   queue:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+      target: development
     container_name: vaultern_queue
     restart: unless-stopped
-    command: php artisan queue:work database --tries=3 --timeout=90
+    command: php artisan queue:work redis --sleep=1 --tries=3 --timeout=90
     depends_on:
       mysql:
         condition: service_healthy
+      redis:
+        condition: service_healthy
       app:
-        condition: service_started
+        condition: service_healthy
     environment:
-      - QUEUE_CONNECTION=database
-      - BROADCAST_CONNECTION=${BROADCAST_CONNECTION:-log}
-      - CACHE_STORE=file
-      - DB_CONNECTION=mysql
-      - DB_HOST=mysql
-      - DB_PORT=3306
-      - DB_DATABASE=vaultern_db
-      - DB_USERNAME=vaultern
-      - DB_PASSWORD=${DB_PASSWORD:-secret}
+      <<: *laravel_env
     volumes:
       - ..:/var/www/html
 
-  # Solo desarrollo local. En cPanel no corre Reverb (usar BROADCAST_CONNECTION=log).
+  scheduler:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: development
+    container_name: vaultern_scheduler
+    restart: unless-stopped
+    command: php artisan schedule:work
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      app:
+        condition: service_healthy
+    environment:
+      <<: *laravel_env
+    volumes:
+      - ..:/var/www/html
+
+  # Solo desarrollo: docker compose --profile realtime up -d
   reverb:
     profiles: ["realtime"]
     build:
       context: ..
       dockerfile: docker/Dockerfile
+      target: development
     container_name: vaultern_reverb
     restart: unless-stopped
     command: php artisan reverb:start --host=0.0.0.0 --port=8080
     ports:
       - "8080:8080"
     environment:
-      - REVERB_APP_ID=${REVERB_APP_ID:-vaultern}
-      - REVERB_APP_KEY=${REVERB_APP_KEY:-behblv1hznnbqwpu0cxo}
-      - REVERB_APP_SECRET=${REVERB_APP_SECRET:-c3hsfp4udwzkw2vjcofr}
-      - REVERB_SERVER_HOST=0.0.0.0
-      - REVERB_SERVER_PORT=8080
-      - REVERB_HOST=localhost
-      - REVERB_PORT=8080
-      - REVERB_SCHEME=http
+      <<: *laravel_env
+      BROADCAST_CONNECTION: reverb
     volumes:
       - ..:/var/www/html
     depends_on:
-      - app
+      app:
+        condition: service_healthy
 
 volumes:
   mysql_data:
+  redis_data:
