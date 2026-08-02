@@ -21,6 +21,7 @@ class StartWompiCheckoutRequest extends FormRequest
         return [
             'plan_code' => ['required', 'string', 'max:40'],
             'billing' => ['nullable', 'string', 'in:monthly,yearly'],
+            'save_card' => ['nullable', 'boolean'],
         ];
     }
 }

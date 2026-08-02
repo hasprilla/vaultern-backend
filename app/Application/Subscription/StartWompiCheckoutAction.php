@@ -16,8 +16,13 @@ final class StartWompiCheckoutAction
     /**
      * @return array{checkout_url: string, payment_id: string, reference: string, payment: \App\Models\SubscriptionPayment}
      */
-    public function execute(Family $family, User $user, string $planCode, string $billing): array
-    {
-        return $this->checkout->startCheckout($family, $user, $planCode, $billing);
+    public function execute(
+        Family $family,
+        User $user,
+        string $planCode,
+        string $billing,
+        bool $saveCard = true,
+    ): array {
+        return $this->checkout->startCheckout($family, $user, $planCode, $billing, $saveCard);
     }
 }

@@ -168,8 +168,9 @@
         <tr><th>Referencia</th><td>{{ $reference }}</td></tr>
         <tr><th>Fecha de pago</th><td>{{ $paidAt }}</td></tr>
         <tr><th>Plan</th><td>{{ $planLabel }} · {{ $billing }}</td></tr>
-        <tr><th>Medio de pago</th><td>{{ $card }}</td></tr>
-        <tr><th>Titular</th><td>{{ $holder }}</td></tr>
+        <tr><th>Tarjeta (enmascarada)</th><td>{{ $card }}</td></tr>
+        <tr><th>Nombre de quien pagó</th><td>{{ $payerName }}</td></tr>
+        <tr><th>Titular en tarjeta</th><td>{{ $holder }}</td></tr>
         <tr><th>Procesador</th><td>{{ $provider }}</td></tr>
     </table>
 
@@ -194,6 +195,7 @@
 
     <p class="note">
         Documento informativo emitido por Zumifly para el titular de la cuenta.
+        Por seguridad solo se muestran los últimos 4 dígitos de la tarjeta; el número completo nunca se almacena.
         No reemplaza el comprobante del procesador de pagos ({{ $provider }}).
         Conserva este archivo como respaldo de tu pago.
     </p>

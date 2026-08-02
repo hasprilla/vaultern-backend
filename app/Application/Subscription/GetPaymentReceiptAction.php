@@ -8,6 +8,7 @@ use App\Models\Family;
 use App\Models\SubscriptionPayment;
 use App\Models\SubscriptionPlan;
 use App\Models\User;
+use App\Support\CardMask;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Throwable;
 
@@ -50,9 +51,9 @@ final class GetPaymentReceiptAction
         $paidAt = optional($payment->paid_at ?? $payment->created_at)?->timezone(config('app.timezone'))->format('d/m/Y H:i');
         $planLabel = $plan?->name ?? $payment->plan_code;
         $billing = $payment->billing === 'yearly' ? 'Anual' : 'Mensual';
-        $card = $payment->card_last4
-            ? trim(($payment->card_brand ?? 'Tarjeta').' •••• '.$payment->card_last4)
-            : '—';
+        $card = CardMask::display($payment->card_brand, $payment->card_last4);
+        $payerName = $payment->card_holder_name
+            ?: ($payment->user?->name ?? '—');
         $provider = match ($payment->provider) {
             'wompi' => 'Wompi',
             'simulated' => 'Simulado',
@@ -69,9 +70,9 @@ final class GetPaymentReceiptAction
                 'planLabel' => $planLabel,
                 'billing' => $billing,
                 'card' => $card,
-                'holder' => $payment->card_holder_name ?: '—',
+                'holder' => $payerName,
                 'provider' => $provider,
-                'payerName' => $payment->user?->name ?? '—',
+                'payerName' => $payerName,
                 'payerEmail' => $payment->user?->email ?? '—',
                 'familyName' => $family?->name ?? '—',
                 'issuedAt' => now()->timezone(config('app.timezone'))->format('d/m/Y H:i'),

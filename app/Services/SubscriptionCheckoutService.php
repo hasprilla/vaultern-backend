@@ -44,6 +44,9 @@ class SubscriptionCheckoutService
         $billing = ($input['billing'] ?? 'monthly') === 'yearly' ? 'yearly' : 'monthly';
         SubscriptionChangePolicy::assertBillingChangeAllowed($family, $billing);
         $isSimulated = (bool) ($input['simulated'] ?? true);
+        $saveCard = array_key_exists('save_card', $input)
+            ? (bool) $input['save_card']
+            : true;
         $reference = 'ZMF-'.strtoupper(Str::random(12));
 
         $plan = SubscriptionPlan::query()
@@ -59,7 +62,7 @@ class SubscriptionCheckoutService
                 : $plan->price_monthly_cents;
         }
 
-        return DB::transaction(function () use ($family, $user, $plan, $planCode, $billing, $isSimulated, $amountCents, $reference, $input) {
+        return DB::transaction(function () use ($family, $user, $plan, $planCode, $billing, $isSimulated, $amountCents, $reference, $input, $saveCard) {
             $payment = SubscriptionPayment::query()->create([
                 'id' => (string) Str::uuid(),
                 'family_id' => $family->id,
@@ -72,7 +75,10 @@ class SubscriptionCheckoutService
                 'status' => 'pending',
                 'provider' => $isSimulated ? 'simulated' : 'manual',
                 'payment_reference' => $reference,
-                'metadata' => ['mode' => $isSimulated ? 'simulated' : 'live'],
+                'metadata' => [
+                    'mode' => $isSimulated ? 'simulated' : 'live',
+                    'save_card' => $saveCard,
+                ],
             ]);
 
             $this->logEvent($payment, $user, 'payment_initiated', 'Pago iniciado', [
@@ -150,6 +156,7 @@ class SubscriptionCheckoutService
                     'brand' => $cardMeta['brand'],
                     'holder' => $cardMeta['holder'],
                 ],
+                $saveCard,
             );
 
             return [
@@ -170,7 +177,10 @@ class SubscriptionCheckoutService
     /**
      * Activa suscripción tras pago exitoso (simulado o Wompi).
      *
-     * @param  array{last4?: string, brand?: string, holder?: string}|null  $renewalCard
+     * Solo persiste marca + últimos 4 + titular (nunca PAN/CVC).
+     * La tarjeta para renovación se guarda únicamente si $saveCard es true.
+     *
+     * @param  array{last4?: string, brand?: string, holder?: string}|null  $cardMeta
      */
     public function activateFromSuccessfulPayment(
         Family $family,
@@ -179,33 +189,52 @@ class SubscriptionCheckoutService
         SubscriptionPlan $plan,
         string $billing,
         string $provider,
-        ?array $renewalCard = null,
+        ?array $cardMeta = null,
+        ?bool $saveCard = null,
     ): Subscription {
         $periodEnd = SubscriptionPeriod::periodEndFrom(now(), $billing);
+        $saveCard ??= (bool) (($payment->metadata ?? [])['save_card'] ?? false);
+
+        $existing = $family->subscription;
+        $payload = [
+            'id' => $existing?->id ?? (string) Str::uuid(),
+            'plan_code' => $plan->code,
+            'billing' => $billing,
+            'status' => 'active',
+            'provider' => $provider,
+            'current_period_end' => $periodEnd,
+            'cancelled_at' => null,
+        ];
+
+        if (
+            $saveCard
+            && is_array($cardMeta)
+            && filled($cardMeta['last4'] ?? null)
+        ) {
+            $payload['renewal_card_last4'] = substr((string) $cardMeta['last4'], -4);
+            $payload['renewal_card_brand'] = $cardMeta['brand'] ?? null;
+            $payload['renewal_card_holder_name'] = $cardMeta['holder'] ?? null;
+            $payload['renewal_user_id'] = $user->id;
+        }
 
         $subscription = Subscription::query()->updateOrCreate(
             ['family_id' => $family->id],
-            [
-                'id' => $family->subscription?->id ?? (string) Str::uuid(),
-                'plan_code' => $plan->code,
-                'billing' => $billing,
-                'status' => 'active',
-                'provider' => $provider,
-                'current_period_end' => $periodEnd,
-                'cancelled_at' => null,
-                'renewal_card_last4' => $renewalCard['last4'] ?? null,
-                'renewal_card_brand' => $renewalCard['brand'] ?? null,
-                'renewal_card_holder_name' => $renewalCard['holder'] ?? null,
-                'renewal_user_id' => $user->id,
-            ],
+            $payload,
         );
 
-        $payment->update([
+        $paymentUpdate = [
             'status' => 'succeeded',
             'paid_at' => now(),
             'subscription_id' => $subscription->id,
             'failure_reason' => null,
-        ]);
+        ];
+        if (is_array($cardMeta) && filled($cardMeta['last4'] ?? null)) {
+            $paymentUpdate['card_last4'] = substr((string) $cardMeta['last4'], -4);
+            $paymentUpdate['card_brand'] = $cardMeta['brand'] ?? $payment->card_brand;
+            $paymentUpdate['card_holder_name'] = $cardMeta['holder'] ?: ($payment->card_holder_name ?: $user->name);
+        }
+
+        $payment->update($paymentUpdate);
 
         $family->update(['plan' => $plan->code]);
 

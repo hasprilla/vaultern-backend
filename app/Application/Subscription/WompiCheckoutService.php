@@ -12,6 +12,7 @@ use App\Models\SubscriptionPlan;
 use App\Models\User;
 use App\Services\FamilyNotificationService;
 use App\Services\SubscriptionCheckoutService;
+use App\Support\CardMask;
 use App\Support\SubscriptionChangePolicy;
 use App\Support\SubscriptionPlanCatalog;
 use Illuminate\Support\Facades\DB;
@@ -31,8 +32,13 @@ class WompiCheckoutService
     /**
      * @return array{checkout_url: string, payment_id: string, reference: string, payment: SubscriptionPayment}
      */
-    public function startCheckout(Family $family, User $user, string $planCode, string $billing): array
-    {
+    public function startCheckout(
+        Family $family,
+        User $user,
+        string $planCode,
+        string $billing,
+        bool $saveCard = true,
+    ): array {
         if (! $this->client->isConfigured()) {
             throw ValidationException::withMessages([
                 'wompi' => 'Wompi no está habilitado en el servidor.',
@@ -79,6 +85,7 @@ class WompiCheckoutService
             $currency,
             $reference,
             $appUrl,
+            $saveCard,
         ) {
             $payment = SubscriptionPayment::query()->create([
                 'id' => (string) Str::uuid(),
@@ -92,7 +99,10 @@ class WompiCheckoutService
                 'status' => 'pending',
                 'provider' => 'wompi',
                 'payment_reference' => $reference,
-                'metadata' => ['mode' => 'wompi'],
+                'metadata' => [
+                    'mode' => 'wompi',
+                    'save_card' => $saveCard,
+                ],
             ]);
 
             $this->logEvent($payment, $user, 'payment_initiated', 'Checkout Wompi iniciado', [
@@ -379,6 +389,9 @@ class WompiCheckoutService
                     return;
                 }
 
+                $cardMeta = CardMask::fromWompiTransaction($tx);
+                $saveCard = (bool) (($payment->metadata ?? [])['save_card'] ?? false);
+
                 $this->checkoutService->activateFromSuccessfulPayment(
                     $family,
                     $user,
@@ -386,6 +399,8 @@ class WompiCheckoutService
                     $plan,
                     (string) $payment->billing,
                     'wompi',
+                    $cardMeta,
+                    $saveCard,
                 );
 
                 return;

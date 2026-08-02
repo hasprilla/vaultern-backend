@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Family;
 use App\Models\SubscriptionPayment;
 use App\Models\SubscriptionPlan;
+use App\Application\Subscription\Actions\DeleteSavedPaymentMethodAction;
 use App\Application\Subscription\GetPaymentReceiptAction;
 use App\Application\Subscription\StartWompiCheckoutAction;
 use App\Application\Subscription\SyncWompiPaymentAction;
@@ -18,6 +19,7 @@ use App\Services\SubscriptionBillingService;
 use App\Services\SubscriptionCancelService;
 use App\Services\SubscriptionCheckoutService;
 use App\Services\SubscriptionRenewalService;
+use App\Support\CardMask;
 use App\Support\SubscriptionPlanCatalog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -34,6 +36,7 @@ class SubscriptionController extends Controller
         private readonly StartWompiCheckoutAction $startWompiCheckoutAction,
         private readonly SyncWompiPaymentAction $syncWompiPaymentAction,
         private readonly GetPaymentReceiptAction $getPaymentReceiptAction,
+        private readonly DeleteSavedPaymentMethodAction $deleteSavedPaymentMethod,
         private readonly SubscriptionCancelService $cancelService,
         private readonly SubscriptionRenewalService $renewalService,
         private readonly SubscriptionBillingService $billingService,
@@ -99,6 +102,19 @@ class SubscriptionController extends Controller
         $subscription = $family->subscription;
         $features = $this->planFeatures->featuresForFamily($family);
 
+        $savedMethod = null;
+        if ($subscription?->renewal_card_last4) {
+            $savedMethod = [
+                'brand' => $subscription->renewal_card_brand,
+                'last4' => $subscription->renewal_card_last4,
+                'holder_name' => $subscription->renewal_card_holder_name,
+                'masked' => CardMask::display(
+                    $subscription->renewal_card_brand,
+                    $subscription->renewal_card_last4,
+                ),
+            ];
+        }
+
         return response()->json([
             'data' => [
                 'plan_code' => $family->activePlanCode(),
@@ -113,8 +129,49 @@ class SubscriptionController extends Controller
                 'access_until' => $subscription?->accessUntilDate(),
                 'free_from' => $subscription?->freeFromDate()?->toDateString(),
                 'auto_renew' => $subscription?->canAutoRenew() ?? false,
+                'saved_payment_method' => $savedMethod,
             ],
         ]);
+    }
+
+    public function paymentMethod(Request $request): JsonResponse
+    {
+        $family = $this->resolveFamily($request);
+        if ($family === null) {
+            return response()->json(['message' => 'Familia no encontrada'], 404);
+        }
+
+        $subscription = $family->subscription;
+        if ($subscription === null || $subscription->renewal_card_last4 === null) {
+            return response()->json(['data' => null]);
+        }
+
+        return response()->json([
+            'data' => [
+                'brand' => $subscription->renewal_card_brand,
+                'last4' => $subscription->renewal_card_last4,
+                'holder_name' => $subscription->renewal_card_holder_name,
+                'masked' => CardMask::display(
+                    $subscription->renewal_card_brand,
+                    $subscription->renewal_card_last4,
+                ),
+            ],
+        ]);
+    }
+
+    public function deletePaymentMethod(Request $request): JsonResponse
+    {
+        $family = $this->resolveFamily($request);
+        if ($family === null) {
+            return response()->json(['message' => 'Familia no encontrada'], 404);
+        }
+
+        $result = $this->deleteSavedPaymentMethod->execute($family, $request->user());
+        if (($result['ok'] ?? false) !== true) {
+            return response()->json(['message' => $result['message']], $result['status']);
+        }
+
+        return response()->json(['message' => 'Tarjeta eliminada. No se guardó ningún dato sensible del PAN.']);
     }
 
     public function checkout(Request $request): JsonResponse
@@ -134,6 +191,7 @@ class SubscriptionController extends Controller
             'plan_code' => ['required', 'string', 'max:40'],
             'billing' => ['nullable', 'string', 'in:monthly,yearly'],
             'simulated' => ['nullable', 'boolean'],
+            'save_card' => ['nullable', 'boolean'],
             'card_number' => ['required', 'string', 'min:13', 'max:23'],
             'exp_month' => ['required', 'integer', 'min:1', 'max:12'],
             'exp_year' => ['required', 'integer', 'min:'.(int) date('Y'), 'max:'.((int) date('Y') + 20)],
@@ -168,6 +226,7 @@ class SubscriptionController extends Controller
             $request->user(),
             (string) $validated['plan_code'],
             (string) ($validated['billing'] ?? 'monthly'),
+            array_key_exists('save_card', $validated) ? (bool) $validated['save_card'] : true,
         );
 
         return response()->json([

@@ -124,6 +124,8 @@ Route::prefix('v1')->middleware(['api.auth', 'tenant'])->group(function () {
     Route::get('/subscriptions/plans', [SubscriptionController::class, 'plans']);
     Route::get('/subscriptions/checkout-config', [SubscriptionController::class, 'checkoutConfig']);
     Route::get('/subscriptions/current', [SubscriptionController::class, 'current']);
+    Route::get('/subscriptions/payment-method', [SubscriptionController::class, 'paymentMethod']);
+    Route::delete('/subscriptions/payment-method', [SubscriptionController::class, 'deletePaymentMethod']);
     Route::get('/subscriptions/payments', [SubscriptionController::class, 'payments']);
     Route::get('/subscriptions/payments/{payment}', [SubscriptionController::class, 'showPayment']);
     Route::get('/subscriptions/payments/{payment}/receipt', [SubscriptionController::class, 'paymentReceipt']);
