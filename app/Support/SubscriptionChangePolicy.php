@@ -111,13 +111,8 @@ final class SubscriptionChangePolicy
             ]);
         }
 
-        self::assertNotSamePlan($family, $planCode);
-
         $billing = $billing === 'yearly' ? 'yearly' : 'monthly';
         $currentBilling = ($subscription->billing ?? 'monthly') === 'yearly' ? 'yearly' : 'monthly';
-
-        // Mismo plan ya bloqueado; si quieren solo cambiar billing del mismo plan, tampoco.
-        // Cambio a otro plan con billing distinto: permitido como pending (incluido anual→mensual al vencer).
 
         $plan = SubscriptionPlan::query()
             ->where('code', $planCode)
@@ -131,6 +126,8 @@ final class SubscriptionChangePolicy
             ]);
         }
 
+        // Mismo plan + mismo ciclo: no tiene sentido programar.
+        // Mismo plan + otro ciclo (mensual↔anual) o plan distinto: sí, al vencimiento.
         if ($currentBilling === $billing && $subscription->plan_code === $planCode) {
             throw ValidationException::withMessages([
                 'plan_code' => 'Ya tienes este plan y ciclo de facturación.',

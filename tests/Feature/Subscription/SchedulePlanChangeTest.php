@@ -80,4 +80,56 @@ class SchedulePlanChangeTest extends TestCase
         $this->assertSame('family_plus', $family->subscription->plan_code);
         $this->assertSame('family_pro', $family->subscription->pending_plan_code);
     }
+
+    public function test_can_schedule_same_plan_with_other_billing_cycle(): void
+    {
+        SubscriptionPlanCatalog::ensureSeeded();
+        ['tokens' => $tokens, 'family' => $family, 'user' => $user] = $this->createUserWithFamily();
+
+        Subscription::query()->create([
+            'id' => (string) Str::uuid(),
+            'family_id' => $family->id,
+            'plan_code' => 'family_plus',
+            'billing' => 'monthly',
+            'status' => 'active',
+            'provider' => 'simulated',
+            'current_period_end' => now()->addMonth(),
+            'renewal_user_id' => $user->id,
+        ]);
+        $family->update(['plan' => 'family_plus']);
+
+        $this->postJson('/api/v1/subscriptions/schedule-change', [
+            'plan_code' => 'family_plus',
+            'billing' => 'yearly',
+        ], $this->authHeaders($tokens))
+            ->assertOk()
+            ->assertJsonPath('data.pending_plan_code', 'family_plus')
+            ->assertJsonPath('data.pending_billing', 'yearly');
+
+        $this->assertSame('monthly', $family->fresh()->subscription->billing);
+    }
+
+    public function test_cannot_schedule_same_plan_and_billing(): void
+    {
+        SubscriptionPlanCatalog::ensureSeeded();
+        ['tokens' => $tokens, 'family' => $family, 'user' => $user] = $this->createUserWithFamily();
+
+        Subscription::query()->create([
+            'id' => (string) Str::uuid(),
+            'family_id' => $family->id,
+            'plan_code' => 'family_plus',
+            'billing' => 'monthly',
+            'status' => 'active',
+            'provider' => 'simulated',
+            'current_period_end' => now()->addMonth(),
+            'renewal_user_id' => $user->id,
+        ]);
+        $family->update(['plan' => 'family_plus']);
+
+        $this->postJson('/api/v1/subscriptions/schedule-change', [
+            'plan_code' => 'family_plus',
+            'billing' => 'monthly',
+        ], $this->authHeaders($tokens))
+            ->assertStatus(422);
+    }
 }
