@@ -4,33 +4,31 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1\Subscription;
 
+use App\Application\Subscription\HandleWompiWebhookAction;
 use App\Http\Controllers\Controller;
-use App\Services\MercadoPago\MercadoPagoCheckoutService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
-class MercadoPagoWebhookController extends Controller
+class WompiWebhookController extends Controller
 {
     public function __construct(
-        private readonly MercadoPagoCheckoutService $checkoutService,
+        private readonly HandleWompiWebhookAction $handleWebhook,
     ) {}
 
     public function __invoke(Request $request): JsonResponse
     {
         try {
-            $this->checkoutService->handleWebhook(
+            $this->handleWebhook->execute(
                 $request->all(),
-                $request->query('topic') ?? $request->query('type'),
-                $request->query('id') ?? $request->query('data_id'),
+                $request->header('X-Event-Checksum'),
             );
         } catch (Throwable $e) {
-            Log::error('mp.webhook.exception', [
+            Log::error('wompi.webhook.exception', [
                 'message' => $e->getMessage(),
             ]);
 
-            // 200 para no saturar reintentos de MP ante ids inválidos / ruido.
             return response()->json(['ok' => false, 'error' => 'logged']);
         }
 

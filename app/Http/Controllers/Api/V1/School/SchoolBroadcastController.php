@@ -4,19 +4,21 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1\School;
 
+use App\Application\School\Actions\CreateSchoolBroadcastAction;
 use App\Http\Controllers\Controller;
-use App\Jobs\DispatchSchoolTaskBroadcastJob;
-use App\Models\ClassEnrollment;
 use App\Models\School;
 use App\Models\SchoolClass;
 use App\Models\SchoolTaskBroadcast;
 use App\Models\TeacherMembership;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
 
 class SchoolBroadcastController extends Controller
 {
+    public function __construct(
+        private readonly CreateSchoolBroadcastAction $createBroadcast,
+    ) {}
+
     public function index(Request $request): JsonResponse
     {
         $schoolIds = $this->schoolIdsFor($request);
@@ -32,10 +34,6 @@ class SchoolBroadcastController extends Controller
 
     public function store(Request $request): JsonResponse
     {
-        if (! $request->user()->canBroadcastSchoolTasks()) {
-            return response()->json(['message' => 'Forbidden'], 403);
-        }
-
         $validated = $request->validate([
             'school_id'       => ['required', 'uuid', 'exists:schools,id'],
             'school_class_id' => ['nullable', 'uuid', 'exists:school_classes,id'],
@@ -46,35 +44,17 @@ class SchoolBroadcastController extends Controller
             'due_date'        => ['nullable', 'date'],
         ]);
 
-        if (! $this->userBelongsToSchool($request, $validated['school_id'])) {
-            return response()->json(['message' => 'No perteneces a este colegio'], 403);
+        $result = $this->createBroadcast->execute(
+            $request->user(),
+            $validated,
+            $this->userBelongsToSchool($request, $validated['school_id']),
+        );
+
+        if (($result['ok'] ?? false) !== true) {
+            return response()->json(['message' => $result['message']], $result['status']);
         }
 
-        if (! empty($validated['school_class_id'])) {
-            $class = SchoolClass::query()->findOrFail($validated['school_class_id']);
-            if ($class->school_id !== $validated['school_id']) {
-                return response()->json(['message' => 'Clase inválida para el colegio'], 422);
-            }
-        }
-
-        $broadcast = SchoolTaskBroadcast::query()->create([
-            'id'              => (string) Str::uuid(),
-            'school_id'       => $validated['school_id'],
-            'school_class_id' => $validated['school_class_id'] ?? null,
-            'created_by'      => $request->user()->id,
-            'title'           => $validated['title'],
-            'description'     => $validated['description'] ?? null,
-            'subject'         => $validated['subject'] ?? null,
-            'priority'        => $validated['priority'] ?? 'media',
-            'due_date'        => $validated['due_date'] ?? null,
-            'status'          => 'pending',
-        ]);
-
-        DispatchSchoolTaskBroadcastJob::dispatch($broadcast->id);
-
-        return response()->json([
-            'data' => $broadcast->fresh(['schoolClass', 'creator:id,name']),
-        ], 201);
+        return response()->json(['data' => $result['broadcast']], 201);
     }
 
     public function show(Request $request, SchoolTaskBroadcast $broadcast): JsonResponse

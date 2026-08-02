@@ -24,16 +24,16 @@ class SubscriptionCheckoutService
     ) {}
 
     /**
-     * Checkout simulado (tarjeta). Deshabilitado si Mercado Pago está activo.
+     * Checkout simulado (tarjeta). Deshabilitado si Wompi está activo.
      *
      * @param  array<string, mixed>  $input
      * @return array<string, mixed>
      */
     public function checkout(Family $family, User $user, array $input): array
     {
-        if (config('mercadopago.enabled')) {
+        if (config('wompi.enabled')) {
             throw ValidationException::withMessages([
-                'mercadopago' => 'Usa el checkout de Mercado Pago (POST /subscriptions/checkout/mp).',
+                'wompi' => 'Usa el checkout de Wompi (POST /subscriptions/checkout/wompi).',
             ]);
         }
 
@@ -166,7 +166,7 @@ class SubscriptionCheckoutService
     }
 
     /**
-     * Activa suscripción tras pago exitoso (simulado o Mercado Pago).
+     * Activa suscripción tras pago exitoso (simulado o Wompi).
      *
      * @param  array{last4?: string, brand?: string, holder?: string}|null  $renewalCard
      */

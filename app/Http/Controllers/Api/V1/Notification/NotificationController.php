@@ -4,11 +4,10 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1\Notification;
 
+use App\Application\Notification\Actions\MarkNotificationReadAction;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Concerns\ResolvesPagination;
 use App\Models\AppNotification;
-use App\Models\User;
-use App\Services\FamilyNotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -16,7 +15,9 @@ class NotificationController extends Controller
 {
     use ResolvesPagination;
 
-    public function __construct(private readonly FamilyNotificationService $notifications) {}
+    public function __construct(
+        private readonly MarkNotificationReadAction $markNotificationRead,
+    ) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -42,44 +43,9 @@ class NotificationController extends Controller
             ->where('user_id', $request->user()->id)
             ->findOrFail($notification);
 
-        $wasUnread = ! $model->read;
+        $model = $this->markNotificationRead->execute($request->user(), $model);
 
-        if ($wasUnread) {
-            $model->update(['read' => true, 'read_at' => now()]);
-            $this->notifyActorOfReadReceipt($request->user(), $model->fresh());
-        }
-
-        return response()->json(['data' => $model->fresh()]);
-    }
-
-    /**
-     * Avisa al familiar que originó la acción cuando su pareja lee la alerta (vía cola + FCM).
-     */
-    private function notifyActorOfReadReceipt(User $reader, AppNotification $notification): void
-    {
-        $actorId = (int) ($notification->data['actor_id'] ?? 0);
-        if ($actorId <= 0 || $actorId === (int) $reader->id || $reader->family_id === null) {
-            return;
-        }
-
-        $actor = User::query()->find($actorId);
-        if ($actor === null || $actor->family_id !== $reader->family_id) {
-            return;
-        }
-
-        $this->notifications->notifyUsers(
-            $reader,
-            [$actorId],
-            'alert_read',
-            'Alerta vista',
-            "{$reader->name} vio tu alerta: {$notification->title}",
-            [
-                'actor_id'              => $reader->id,
-                'actor_name'            => $reader->name,
-                'original_notification' => $notification->id,
-                'read_at'               => $notification->read_at?->toIso8601String(),
-            ],
-        );
+        return response()->json(['data' => $model]);
     }
 
     /**

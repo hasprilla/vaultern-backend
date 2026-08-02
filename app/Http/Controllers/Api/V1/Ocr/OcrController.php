@@ -4,14 +4,12 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1\Ocr;
 
+use App\Application\Ocr\Actions\ProcessOcrJobAction;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Concerns\ResolvesPagination;
 use App\Models\Family;
 use App\Models\OcrJob;
-use App\Services\FamilyNotificationService;
-use App\Services\Ocr\GoogleVisionOcrService;
 use App\Services\PlanFeatureService;
-use App\Support\FamilyRealtime;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -20,9 +18,8 @@ class OcrController extends Controller
     use ResolvesPagination;
 
     public function __construct(
-        private readonly FamilyNotificationService $notifications,
         private readonly PlanFeatureService $planFeatures,
-        private readonly GoogleVisionOcrService $vision,
+        private readonly ProcessOcrJobAction $processOcrJob,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -51,10 +48,10 @@ class OcrController extends Controller
 
         return response()->json([
             'data' => [
-                'used'      => $used,
-                'limit'     => $limit,
+                'used' => $used,
+                'limit' => $limit,
                 'remaining' => max(0, $limit - $used),
-                'month'     => now()->format('Y-m'),
+                'month' => now()->format('Y-m'),
             ],
         ]);
     }
@@ -83,121 +80,37 @@ class OcrController extends Controller
 
     private function process(Request $request, string $type): JsonResponse
     {
-        $family = Family::query()->findOrFail($request->user()->family_id);
-        $limit = $this->planFeatures->familyFeatureLimit($family, 'ocr_scans_monthly', 5);
-        $used = OcrJob::query()
-            ->where('family_id', $family->id)
-            ->where('created_at', '>=', now()->startOfMonth())
-            ->count();
-
-        if ($used >= $limit) {
-            return response()->json([
-                'message' => "Alcanzaste el límite de {$limit} escaneos OCR este mes. Mejora tu plan para continuar.",
-                'code'    => 'ocr_limit_reached',
-            ], 422);
-        }
-
         $request->validate([
-            'file'      => ['nullable', 'file', 'mimes:jpeg,jpg,png,webp', 'max:10240'],
+            'file' => ['nullable', 'file', 'mimes:jpeg,jpg,png,webp', 'max:10240'],
             'file_path' => ['nullable', 'string'],
             'mime_type' => ['nullable', 'string'],
         ]);
 
         $storedPath = $request->input('file_path');
-        $mimeType   = $request->input('mime_type');
+        $mimeType = $request->input('mime_type');
 
         if ($request->hasFile('file')) {
-            $uploaded   = $request->file('file');
+            $uploaded = $request->file('file');
             $storedPath = $uploaded->store('ocr/'.$request->user()->family_id, 'public');
-            $mimeType   = $uploaded->getClientMimeType();
+            $mimeType = $uploaded->getClientMimeType();
         }
 
-        $rawText = $this->rawTextFor($type, $storedPath !== null);
-        $confidence = $storedPath !== null ? 0.85 : 0.75;
-        $structured = $this->structuredDataFor($type);
-
-        if ($storedPath !== null && $this->vision->isConfigured()) {
-            $vision = $this->vision->extractText($storedPath);
-            if ($vision !== null) {
-                $rawText = $vision['text'];
-                $confidence = $vision['confidence'];
-                $structured = $this->vision->structure($type, $rawText);
-            }
-        }
-
-        $job = OcrJob::query()->create([
-            'family_id'       => $request->user()->family_id,
-            'user_id'         => $request->user()->id,
-            'type'            => $type,
-            'status'          => 'done',
-            'file_path'       => $storedPath,
-            'mime_type'       => $mimeType,
-            'raw_text'        => ['text' => $rawText],
-            'structured_data' => $structured,
-            'confidence'      => $confidence,
-        ]);
-
-        $typeLabel = match ($type) {
-            'handwriting' => 'cuaderno escolar',
-            'invoice'     => 'factura',
-            default       => 'documento',
-        };
-
-        $this->notifications->notifyFamily(
+        $result = $this->processOcrJob->execute(
             $request->user(),
-            'ocr_scan',
-            'Documento escaneado',
-            "{$request->user()->name} digitalizó un $typeLabel con OCR",
-            ['entity_type' => 'ocr_job', 'entity_id' => $job->id],
+            $type,
+            is_string($storedPath) ? $storedPath : null,
+            is_string($mimeType) ? $mimeType : null,
         );
 
-        FamilyRealtime::ocrJobUpdated(
-            familyId: (string) $request->user()->family_id,
-            userId: (int) $request->user()->id,
-            jobId: (string) $job->id,
-            status: (string) $job->status,
-            ocrType: $type,
-            action: 'completed',
-        );
+        if (($result['ok'] ?? false) !== true) {
+            $payload = ['message' => $result['message']];
+            if (isset($result['code'])) {
+                $payload['code'] = $result['code'];
+            }
 
-        return response()->json(['data' => $job], 202);
-    }
-
-    private function rawTextFor(string $type, bool $hasFile): string
-    {
-        if (! $hasFile) {
-            return 'Escaneo sin imagen adjunta.';
+            return response()->json($payload, $result['status']);
         }
 
-        return match ($type) {
-            'handwriting' => 'Cuaderno escolar digitalizado. Tareas detectadas en apuntes manuscritos.',
-            'invoice'     => 'Factura digitalizada. Proveedor y total extraídos.',
-            default       => 'Documento digitalizado correctamente.',
-        };
-    }
-
-    /** @return array<string, mixed> */
-    private function structuredDataFor(string $type): array
-    {
-        return match ($type) {
-            'invoice' => [
-                'vendor'       => 'Tienda Demo',
-                'total'        => 45000,
-                'currency'     => 'COP',
-                'invoice_date' => now()->toDateString(),
-            ],
-            'handwriting' => [
-                'tasks' => [
-                    ['title' => 'Matemáticas ej. 1-10', 'subject' => 'Matemáticas'],
-                    ['title' => 'Leer capítulo 3', 'subject' => 'Español'],
-                ],
-            ],
-            default => [
-                'lines' => ['Documento digitalizado correctamente'],
-                'tasks' => [
-                    ['title' => 'Revisar documento escaneado', 'subject' => 'General'],
-                ],
-            ],
-        };
+        return response()->json(['data' => $result['job']], 202);
     }
 }

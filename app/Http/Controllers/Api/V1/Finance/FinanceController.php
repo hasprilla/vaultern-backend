@@ -4,20 +4,25 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1\Finance;
 
+use App\Application\Finance\Actions\CreateBudgetAction;
+use App\Application\Finance\Actions\CreateTransactionAction;
+use App\Application\Finance\Actions\DeleteBudgetAction;
+use App\Application\Finance\Actions\DeleteTransactionAction;
+use App\Application\Finance\Actions\UpdateBudgetAction;
+use App\Application\Finance\Actions\UpdateTransactionAction;
 use App\Domains\Finance\Entities\FinanceReportPeriod;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Concerns\ResolvesPagination;
 use App\Http\Controllers\Concerns\ReturnsForbidden;
 use App\Http\Controllers\Concerns\ScopesByChildGuardianship;
+use App\Http\Resources\Api\V1\BudgetResource;
+use App\Http\Resources\Api\V1\TransactionResource;
 use App\Models\Budget;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\ChildGuardianService;
-use App\Services\FamilyNotificationService;
-use App\Support\FamilyRealtime;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
 
 class FinanceController extends Controller
 {
@@ -26,8 +31,13 @@ class FinanceController extends Controller
     use ScopesByChildGuardianship;
 
     public function __construct(
-        private readonly FamilyNotificationService $notifications,
         private readonly ChildGuardianService $guardians,
+        private readonly CreateTransactionAction $createTransaction,
+        private readonly UpdateTransactionAction $updateTransaction,
+        private readonly DeleteTransactionAction $deleteTransaction,
+        private readonly CreateBudgetAction $createBudget,
+        private readonly UpdateBudgetAction $updateBudget,
+        private readonly DeleteBudgetAction $deleteBudget,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -68,43 +78,15 @@ class FinanceController extends Controller
         ]);
 
         $child = User::query()->findOrFail($validated['child_id']);
-        if ($child->family_id !== $request->user()->family_id || $child->role !== 'hijo') {
-            return response()->json(['message' => 'Hijo no válido para esta familia'], 422);
-        }
         $this->assertCanAccessChild($request->user(), $this->guardians, (int) $child->id);
 
-        $transaction = Transaction::query()->create([
-            'id'               => (string) Str::uuid(),
-            'family_id'        => $request->user()->family_id,
-            'user_id'          => $request->user()->id,
-            'child_id'         => $validated['child_id'],
-            ...$validated,
-            'currency'         => $validated['currency'] ?? 'COP',
-        ]);
+        $result = $this->createTransaction->execute($request->user(), $child, $validated);
 
-        $transaction->load('child');
+        if (($result['ok'] ?? false) !== true) {
+            return response()->json(['message' => $result['message']], $result['status']);
+        }
 
-        $label = $validated['type'] === 'income' ? 'Ingreso' : 'Gasto';
-        $amount = number_format((float) $validated['amount'], 0, ',', '.');
-        $this->notifications->notifyChildGuardians(
-            $request->user(),
-            (int) $child->id,
-            'finance_transaction',
-            "$label registrado",
-            "{$request->user()->name} registró $label de {$child->name} por \$$amount COP",
-            ['entity_type' => 'transaction', 'entity_id' => $transaction->id],
-        );
-
-        FamilyRealtime::financeChanged(
-            familyId: (string) $request->user()->family_id,
-            entityType: 'transaction',
-            entityId: (string) $transaction->id,
-            action: 'created',
-            actorId: (int) $request->user()->id,
-            childId: (int) $child->id,
-        );
-
-        return response()->json(['data' => $transaction], 201);
+        return response()->json(['data' => new TransactionResource($result['transaction'])], 201);
     }
 
     public function update(Request $request, string $transaction): JsonResponse
@@ -129,41 +111,22 @@ class FinanceController extends Controller
             $this->assertCanAccessChild($request->user(), $this->guardians, (int) $validated['child_id']);
         }
 
-        $model->update($validated);
-        $model->load('child');
+        $model = $this->updateTransaction->execute($request->user(), $model, $validated);
 
-        if ($model->child_id !== null) {
-            $this->notifications->notifyChildGuardians(
-                $request->user(),
-                (int) $model->child_id,
-                'finance_transaction',
-                'Transacción actualizada',
-                "{$request->user()->name} actualizó una transacción de {$model->child?->name}",
-                ['entity_type' => 'transaction', 'entity_id' => $model->id],
-            );
-        }
-
-        FamilyRealtime::financeChanged(
-            familyId: (string) $request->user()->family_id,
-            entityType: 'transaction',
-            entityId: (string) $model->id,
-            action: 'updated',
-            actorId: (int) $request->user()->id,
-            childId: $model->child_id !== null ? (int) $model->child_id : null,
-        );
-
-        return response()->json(['data' => $model]);
+        return response()->json(['data' => new TransactionResource($model)]);
     }
 
     public function show(Request $request, string $transaction): JsonResponse
     {
-        $model = $this->transactionsForGuardian($request->user(), $this->guardians)->findOrFail($transaction);
+        $model = $this->transactionsForGuardian($request->user(), $this->guardians)
+            ->with('child')
+            ->findOrFail($transaction);
 
         if ($forbidden = $this->forbidUnlessAuthorized('view', $model)) {
             return $forbidden;
         }
 
-        return response()->json(['data' => $model]);
+        return response()->json(['data' => new TransactionResource($model)]);
     }
 
     public function destroy(Request $request, string $transaction): JsonResponse
@@ -175,30 +138,8 @@ class FinanceController extends Controller
         if ($forbidden = $this->forbidUnlessAuthorized('delete', $model)) {
             return $forbidden;
         }
-        $description = $model->description ?? 'Transacción';
-        $childId = $model->child_id !== null ? (int) $model->child_id : null;
-        $childName = $model->child?->name;
-        $model->delete();
 
-        if ($childId !== null) {
-            $this->notifications->notifyChildGuardians(
-                $request->user(),
-                $childId,
-                'finance_transaction',
-                'Transacción eliminada',
-                "{$request->user()->name} eliminó «{$description}»".($childName ? " de {$childName}" : ''),
-                ['entity_type' => 'transaction', 'entity_id' => $transaction],
-            );
-        }
-
-        FamilyRealtime::financeChanged(
-            familyId: (string) $request->user()->family_id,
-            entityType: 'transaction',
-            entityId: (string) $transaction,
-            action: 'deleted',
-            actorId: (int) $request->user()->id,
-            childId: $childId,
-        );
+        $this->deleteTransaction->execute($request->user(), $model);
 
         return response()->json(['message' => 'Transacción eliminada.']);
     }
@@ -209,7 +150,7 @@ class FinanceController extends Controller
             return $forbidden;
         }
 
-        return response()->json(['data' => Budget::query()->get()]);
+        return BudgetResource::collection(Budget::query()->get());
     }
 
     public function budgetsStore(Request $request): JsonResponse
@@ -227,31 +168,9 @@ class FinanceController extends Controller
             'end_date'   => ['required', 'date', 'after_or_equal:start_date'],
         ]);
 
-        $budget = Budget::query()->create([
-            'id'        => (string) Str::uuid(),
-            'family_id' => $request->user()->family_id,
-            ...$validated,
-            'currency'  => $validated['currency'] ?? 'COP',
-            'period'    => $validated['period'] ?? 'monthly',
-        ]);
+        $budget = $this->createBudget->execute($request->user(), $validated);
 
-        $this->notifications->notifyFamily(
-            $request->user(),
-            'finance_budget',
-            'Presupuesto creado',
-            "{$request->user()->name} creó el presupuesto «{$budget->name}»",
-            ['entity_type' => 'budget', 'entity_id' => $budget->id],
-        );
-
-        FamilyRealtime::financeChanged(
-            familyId: (string) $request->user()->family_id,
-            entityType: 'budget',
-            entityId: (string) $budget->id,
-            action: 'created',
-            actorId: (int) $request->user()->id,
-        );
-
-        return response()->json(['data' => $budget], 201);
+        return response()->json(['data' => new BudgetResource($budget)], 201);
     }
 
     public function budgetsUpdate(Request $request, string $budget): JsonResponse
@@ -267,25 +186,9 @@ class FinanceController extends Controller
             'amount' => ['sometimes', 'numeric', 'min:0'],
         ]);
 
-        $model->update($validated);
+        $model = $this->updateBudget->execute($request->user(), $model, $validated);
 
-        $this->notifications->notifyFamily(
-            $request->user(),
-            'finance_budget',
-            'Presupuesto actualizado',
-            "{$request->user()->name} actualizó el presupuesto «{$model->name}»",
-            ['entity_type' => 'budget', 'entity_id' => $model->id],
-        );
-
-        FamilyRealtime::financeChanged(
-            familyId: (string) $request->user()->family_id,
-            entityType: 'budget',
-            entityId: (string) $model->id,
-            action: 'updated',
-            actorId: (int) $request->user()->id,
-        );
-
-        return response()->json(['data' => $model->fresh()]);
+        return response()->json(['data' => new BudgetResource($model)]);
     }
 
     public function budgetsDestroy(Request $request, string $budget): JsonResponse
@@ -296,24 +199,7 @@ class FinanceController extends Controller
             return $forbidden;
         }
 
-        $name = $model->name;
-        $model->delete();
-
-        $this->notifications->notifyFamily(
-            $request->user(),
-            'finance_budget',
-            'Presupuesto eliminado',
-            "{$request->user()->name} eliminó el presupuesto «{$name}»",
-            ['entity_type' => 'budget', 'entity_id' => $budget],
-        );
-
-        FamilyRealtime::financeChanged(
-            familyId: (string) $request->user()->family_id,
-            entityType: 'budget',
-            entityId: (string) $budget,
-            action: 'deleted',
-            actorId: (int) $request->user()->id,
-        );
+        $this->deleteBudget->execute($request->user(), $model);
 
         return response()->json(['message' => 'Presupuesto eliminado.']);
     }

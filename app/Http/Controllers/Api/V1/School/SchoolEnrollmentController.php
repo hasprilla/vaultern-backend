@@ -4,18 +4,22 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1\School;
 
+use App\Application\School\Actions\CancelEnrollmentAction;
+use App\Application\School\Actions\EnrollStudentAction;
+use App\Application\School\Actions\RegisterSchoolAction;
 use App\Http\Controllers\Controller;
 use App\Models\ClassEnrollment;
 use App\Models\School;
-use App\Models\SchoolClass;
-use App\Models\User;
-use App\Services\FamilyNotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class SchoolEnrollmentController extends Controller
 {
-    public function __construct(private readonly FamilyNotificationService $notifications) {}
+    public function __construct(
+        private readonly EnrollStudentAction $enrollStudent,
+        private readonly CancelEnrollmentAction $cancelEnrollment,
+        private readonly RegisterSchoolAction $registerSchool,
+    ) {}
 
     public function lookup(Request $request): JsonResponse
     {
@@ -38,54 +42,19 @@ class SchoolEnrollmentController extends Controller
 
     public function store(Request $request): JsonResponse
     {
-        if (! $request->user()->canManageTasks()) {
-            return response()->json(['message' => 'Forbidden'], 403);
-        }
-
         $validated = $request->validate([
-            'school_code'     => ['required', 'string', 'max:12'],
+            'school_code' => ['required', 'string', 'max:12'],
             'school_class_id' => ['required', 'uuid', 'exists:school_classes,id'],
             'student_user_id' => ['required', 'integer', 'exists:users,id'],
         ]);
 
-        $school = School::query()
-            ->where('code', strtoupper($validated['school_code']))
-            ->where('is_active', true)
-            ->firstOrFail();
+        $result = $this->enrollStudent->execute($request->user(), $validated);
 
-        $class = SchoolClass::query()
-            ->where('school_id', $school->id)
-            ->findOrFail($validated['school_class_id']);
-
-        $student = User::query()->findOrFail($validated['student_user_id']);
-
-        if ($student->family_id !== $request->user()->family_id || $student->role !== 'hijo') {
-            return response()->json(['message' => 'El alumno debe ser un hijo de tu familia'], 422);
+        if (($result['ok'] ?? false) !== true) {
+            return response()->json(['message' => $result['message']], $result['status']);
         }
 
-        $enrollment = ClassEnrollment::query()->updateOrCreate(
-            [
-                'school_class_id' => $class->id,
-                'student_user_id' => $student->id,
-            ],
-            [
-                'family_id'   => $student->family_id,
-                'enrolled_by' => $request->user()->id,
-                'status'      => 'active',
-            ],
-        );
-
-        $enrollment->load(['schoolClass.school', 'student']);
-
-        $this->notifications->notifyFamily(
-            $request->user(),
-            'school_enrollment',
-            'Inscripción escolar',
-            "{$request->user()->name} inscribió a {$student->name} en {$school->name}",
-            ['entity_type' => 'school_enrollment', 'entity_id' => $enrollment->id],
-        );
-
-        return response()->json(['data' => $enrollment], 201);
+        return response()->json(['data' => $result['enrollment']], 201);
     }
 
     public function index(Request $request): JsonResponse
@@ -106,78 +75,33 @@ class SchoolEnrollmentController extends Controller
 
     public function destroy(Request $request, string $enrollment): JsonResponse
     {
-        if (! $request->user()->canManageTasks()) {
-            return response()->json(['message' => 'Forbidden'], 403);
-        }
-
         $model = ClassEnrollment::query()->findOrFail($enrollment);
+        $result = $this->cancelEnrollment->execute($request->user(), $model);
 
-        if ($model->family_id !== $request->user()->family_id) {
-            return response()->json(['message' => 'No autorizado'], 403);
+        if (($result['ok'] ?? false) !== true) {
+            return response()->json(['message' => $result['message']], $result['status']);
         }
-
-        $model->load(['schoolClass.school', 'student']);
-        $studentName = $model->student?->name ?? 'Alumno';
-        $schoolName = $model->schoolClass?->school?->name ?? 'Colegio';
-
-        $model->update(['status' => 'cancelled']);
-
-        $this->notifications->notifyFamily(
-            $request->user(),
-            'school_enrollment',
-            'Inscripción cancelada',
-            "{$request->user()->name} canceló la inscripción de {$studentName} en {$schoolName}",
-            ['entity_type' => 'school_enrollment', 'entity_id' => $model->id],
-        );
 
         return response()->json(['message' => 'Vinculación con el colegio cancelada.']);
     }
 
     public function register(Request $request): JsonResponse
     {
-        if (! $request->user()->canManageTasks()) {
-            return response()->json(['message' => 'Solo padres, madres o tutores pueden registrar un colegio.'], 403);
-        }
-
         $validated = $request->validate([
-            'name'       => ['required', 'string', 'min:3', 'max:120'],
-            'city'       => ['nullable', 'string', 'max:80'],
+            'name' => ['required', 'string', 'min:3', 'max:120'],
+            'city' => ['nullable', 'string', 'max:80'],
             'class_name' => ['required', 'string', 'min:1', 'max:80'],
         ]);
 
-        $school = School::query()->create([
-            'name'      => $validated['name'],
-            'city'      => $validated['city'] ?? null,
-            'plan'      => 'school',
-            'is_active' => true,
-        ]);
+        $result = $this->registerSchool->execute($request->user(), $validated);
 
-        $class = SchoolClass::query()->create([
-            'school_id'   => $school->id,
-            'name'        => $validated['class_name'],
-            'school_year' => now()->format('Y').'-'.(now()->year + 1),
-        ]);
-
-        if ($request->user()->role === 'docente') {
-            $request->user()->teacherMemberships()->firstOrCreate(
-                ['school_id' => $school->id],
-                ['role' => 'teacher', 'status' => 'active'],
-            );
+        if (($result['ok'] ?? false) !== true) {
+            return response()->json(['message' => $result['message']], $result['status']);
         }
-
-        $school->load(['classes' => fn ($q) => $q->orderBy('name')]);
-
-        $this->notifications->notifyFamily(
-            $request->user(),
-            'school_registered',
-            'Colegio registrado',
-            "{$request->user()->name} registró el colegio {$school->name} (código {$school->code})",
-            ['entity_type' => 'school', 'entity_id' => $school->id],
-        );
 
         return response()->json([
             'message' => 'Colegio registrado. Comparte el código con otras familias.',
-            'data'    => $school,
+            'data' => $result['school'],
         ], 201);
     }
 }

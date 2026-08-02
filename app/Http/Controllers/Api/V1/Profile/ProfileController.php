@@ -4,6 +4,17 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1\Profile;
 
+use App\Application\Auth\DeviceRegistrationService;
+use App\Application\Profile\Actions\ChangePasswordAction;
+use App\Application\Profile\Actions\DeactivateAccountAction;
+use App\Application\Profile\Actions\DeleteAccountAction;
+use App\Application\Profile\Actions\DisableMfaAction;
+use App\Application\Profile\Actions\EnableMfaAction;
+use App\Application\Profile\Actions\ReactivateAccountAction;
+use App\Application\Profile\Actions\SetupMfaAction;
+use App\Application\Profile\Actions\UpdateAvatarAction;
+use App\Application\Profile\Actions\UpdateNotificationPreferencesAction;
+use App\Application\Profile\Actions\UpdateProfileAction;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\Profile\ChangePasswordRequest;
 use App\Http\Requests\Api\V1\Profile\ConfirmPasswordRequest;
@@ -11,51 +22,38 @@ use App\Http\Requests\Api\V1\Profile\ReactivateAccountRequest;
 use App\Http\Requests\Api\V1\Profile\UpdateFcmTokenRequest;
 use App\Http\Requests\Api\V1\Profile\UpdateNotificationPreferencesRequest;
 use App\Http\Requests\Api\V1\Profile\UpdateProfileRequest;
-use App\Models\Device;
 use App\Http\Resources\Api\V1\UserResource;
-use App\Infrastructure\Auth\TokenService;
+use App\Models\Device;
 use App\Models\Family;
-use App\Models\FamilyMember;
 use App\Models\User;
-use App\Services\FamilyNotificationService;
-use App\Services\Mfa\TotpService;
 use App\Services\PlanFeatureService;
-use App\Services\SubscriptionBillingService;
 use App\Support\NotificationPreferences;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Storage;
 
 class ProfileController extends Controller
 {
     public function __construct(
-        private readonly TokenService $tokens,
-        private readonly FamilyNotificationService $notifications,
-        private readonly TotpService $totp,
         private readonly PlanFeatureService $planFeatures,
-        private readonly SubscriptionBillingService $subscriptionBilling,
+        private readonly UpdateProfileAction $updateProfile,
+        private readonly UpdateAvatarAction $updateAvatarAction,
+        private readonly ChangePasswordAction $changePasswordAction,
+        private readonly SetupMfaAction $setupMfaAction,
+        private readonly EnableMfaAction $enableMfaAction,
+        private readonly DisableMfaAction $disableMfaAction,
+        private readonly UpdateNotificationPreferencesAction $updateNotificationPreferencesAction,
+        private readonly DeactivateAccountAction $deactivateAccount,
+        private readonly ReactivateAccountAction $reactivateAccount,
+        private readonly DeleteAccountAction $deleteAccount,
     ) {}
 
     public function update(UpdateProfileRequest $request): JsonResponse
     {
-        $user = $request->user();
-        $user->update($request->validated());
-
-        if ($user->family_id !== null) {
-            $this->notifications->notifyFamily(
-                $user,
-                'profile_updated',
-                'Perfil actualizado',
-                "{$user->name} actualizó su perfil",
-                ['entity_type' => 'user', 'entity_id' => (string) $user->id],
-            );
-        }
+        $user = $this->updateProfile->execute($request->user(), $request->validated());
 
         return response()->json([
             'message' => 'Perfil actualizado.',
-            'data'    => new UserResource($user->fresh()),
+            'data' => new UserResource($user),
         ]);
     }
 
@@ -65,58 +63,24 @@ class ProfileController extends Controller
             'avatar' => ['required', 'image', 'max:5120'],
         ]);
 
-        $user = $request->user();
-        $previous = $user->avatar;
-        $file = $request->file('avatar');
+        $result = $this->updateAvatarAction->execute($request->user(), $request->file('avatar'));
 
-        if ($file === null) {
-            return response()->json(['message' => 'No se recibió ninguna imagen.'], 422);
-        }
-
-        $path = $file->store('avatars/'.$user->id, 'public');
-        $user->update(['avatar' => $path]);
-
-        if (is_string($previous)
-            && $previous !== ''
-            && ! str_starts_with($previous, 'http://')
-            && ! str_starts_with($previous, 'https://')
-            && $previous !== $path
-        ) {
-            Storage::disk('public')->delete($previous);
-        }
-
-        if ($user->family_id !== null) {
-            $this->notifications->notifyFamily(
-                $user,
-                'profile_updated',
-                'Foto de perfil actualizada',
-                "{$user->name} cambió su foto de perfil",
-                ['entity_type' => 'user', 'entity_id' => (string) $user->id],
-            );
+        if (($result['ok'] ?? false) !== true) {
+            return response()->json(['message' => $result['message']], $result['status']);
         }
 
         return response()->json([
             'message' => 'Foto de perfil actualizada.',
-            'data'    => new UserResource($user->fresh()),
+            'data' => new UserResource($result['user']),
         ]);
     }
 
     public function changePassword(ChangePasswordRequest $request): JsonResponse
     {
-        $user = $request->user();
-        $user->update([
-            'password' => Hash::make($request->validated('password')),
-        ]);
-
-        if ($user->family_id !== null) {
-            $this->notifications->notifyFamily(
-                $user,
-                'profile_updated',
-                'Contraseña cambiada',
-                "{$user->name} cambió su contraseña",
-                ['entity_type' => 'user', 'entity_id' => (string) $user->id],
-            );
-        }
+        $this->changePasswordAction->execute(
+            $request->user(),
+            $request->validated('password'),
+        );
 
         return response()->json([
             'message' => 'Contraseña actualizada correctamente.',
@@ -135,12 +99,12 @@ class ProfileController extends Controller
         }
 
         $updated = $query->orderByDesc('last_seen_at')->limit(1)->update([
-            'fcm_token'    => $token,
+            'fcm_token' => $token,
             'last_seen_at' => now(),
         ]);
 
         if ($updated === 0 && $user->device_fingerprint) {
-            app(\App\Application\Auth\DeviceRegistrationService::class)->register(
+            app(DeviceRegistrationService::class)->register(
                 $user,
                 $user->device_fingerprint,
                 null,
@@ -158,7 +122,7 @@ class ProfileController extends Controller
             return response()->json(['data' => []]);
         }
 
-        $family = \App\Models\Family::query()->findOrFail($user->family_id);
+        $family = Family::query()->findOrFail($user->family_id);
         $features = $this->planFeatures->featuresForFamily($family);
         $ocrLimit = $this->planFeatures->familyFeatureLimit($family, 'ocr_scans_monthly', 5);
         $ocrUsed = \App\Models\OcrJob::query()
@@ -173,14 +137,14 @@ class ProfileController extends Controller
         return response()->json([
             'data' => [
                 'plan_code' => $family->activePlanCode(),
-                'features'  => $features,
-                'ocr'       => [
-                    'used'      => $ocrUsed,
-                    'limit'     => $ocrLimit,
+                'features' => $features,
+                'ocr' => [
+                    'used' => $ocrUsed,
+                    'limit' => $ocrLimit,
                     'remaining' => max(0, $ocrLimit - $ocrUsed),
                 ],
                 'children' => [
-                    'used'  => $childrenCount,
+                    'used' => $childrenCount,
                     'limit' => $this->planFeatures->familyFeatureLimit($family, 'max_children', 2),
                 ],
             ],
@@ -189,18 +153,16 @@ class ProfileController extends Controller
 
     public function setupMfa(Request $request): JsonResponse
     {
-        $user = $request->user();
-        if ($user->mfa_enabled) {
-            return response()->json(['message' => 'MFA ya está activo.'], 422);
-        }
+        $result = $this->setupMfaAction->execute($request->user());
 
-        $secret = $this->totp->generateSecret();
-        $user->update(['mfa_secret' => $secret]);
+        if (($result['ok'] ?? false) !== true) {
+            return response()->json(['message' => $result['message']], $result['status']);
+        }
 
         return response()->json([
             'data' => [
-                'secret'          => $secret,
-                'provisioning_uri'=> $this->totp->provisioningUri($secret, $user->email),
+                'secret' => $result['secret'],
+                'provisioning_uri' => $result['provisioning_uri'],
             ],
         ]);
     }
@@ -208,28 +170,18 @@ class ProfileController extends Controller
     public function enableMfa(Request $request): JsonResponse
     {
         $validated = $request->validate(['code' => ['required', 'string', 'size:6']]);
-        $user = $request->user();
+        $result = $this->enableMfaAction->execute($request->user(), $validated['code']);
 
-        if ($user->mfa_secret === null) {
-            return response()->json(['message' => 'Primero configura MFA con setup.'], 422);
+        if (($result['ok'] ?? false) !== true) {
+            return response()->json(['message' => $result['message']], $result['status']);
         }
-
-        if (! $this->totp->verify($user->mfa_secret, $validated['code'])) {
-            return response()->json(['message' => 'Código incorrecto.'], 422);
-        }
-
-        $user->update(['mfa_enabled' => true]);
 
         return response()->json(['message' => 'Autenticación en dos pasos activada.']);
     }
 
     public function disableMfa(ConfirmPasswordRequest $request): JsonResponse
     {
-        $user = $request->user();
-        $user->update([
-            'mfa_enabled' => false,
-            'mfa_secret'  => null,
-        ]);
+        $this->disableMfaAction->execute($request->user());
 
         return response()->json(['message' => 'Autenticación en dos pasos desactivada.']);
     }
@@ -245,46 +197,20 @@ class ProfileController extends Controller
 
     public function updateNotificationPreferences(UpdateNotificationPreferencesRequest $request): JsonResponse
     {
-        $user = $request->user();
-        $merged = NotificationPreferences::merge($user->notification_preferences);
-        $updated = array_merge($merged, $request->validated());
-
-        $user->update(['notification_preferences' => $updated]);
+        $updated = $this->updateNotificationPreferencesAction->execute(
+            $request->user(),
+            $request->validated(),
+        );
 
         return response()->json([
             'message' => 'Preferencias de notificaciones actualizadas.',
-            'data'    => $updated,
+            'data' => $updated,
         ]);
     }
 
     public function deactivate(ConfirmPasswordRequest $request): JsonResponse
     {
-        $user = $request->user();
-
-        if ($user->family_id !== null) {
-            $this->notifications->notifyFamily(
-                $user,
-                'profile_updated',
-                'Cuenta desactivada',
-                "{$user->name} desactivó su cuenta temporalmente",
-                ['entity_type' => 'user', 'entity_id' => (string) $user->id],
-            );
-        }
-
-        DB::transaction(function () use ($user) {
-            $this->haltFamilyBillingIfNeeded($user, 'Cuenta desactivada temporalmente');
-
-            $user->update([
-                'account_status'  => 'deactivated',
-                'deactivated_at'  => now(),
-            ]);
-
-            FamilyMember::query()
-                ->where('user_id', $user->id)
-                ->update(['status' => 'inactive']);
-
-            $this->tokens->revoke($user);
-        });
+        $this->deactivateAccount->execute($request->user());
 
         return response()->json([
             'message' => 'Tu cuenta fue desactivada temporalmente. Puedes reactivarla iniciando sesión.',
@@ -293,97 +219,27 @@ class ProfileController extends Controller
 
     public function reactivate(ReactivateAccountRequest $request): JsonResponse
     {
-        $user = User::query()->where('email', $request->validated('email'))->first();
+        $result = $this->reactivateAccount->execute($request->validated());
 
-        if ($user === null || ! Hash::check($request->validated('password'), $user->password)) {
-            return response()->json(['message' => 'Credenciales inválidas.'], 401);
+        if (($result['ok'] ?? false) !== true) {
+            return response()->json(['message' => $result['message']], $result['status']);
         }
-
-        if ($user->account_status !== 'deactivated') {
-            return response()->json(['message' => 'Esta cuenta no está desactivada.'], 422);
-        }
-
-        $user->update([
-            'account_status' => 'active',
-            'deactivated_at' => null,
-        ]);
-
-        FamilyMember::query()
-            ->where('user_id', $user->id)
-            ->update(['status' => 'active']);
-
-        if ($user->family_id !== null) {
-            $this->notifications->notifyFamily(
-                $user,
-                'profile_updated',
-                'Cuenta reactivada',
-                "{$user->name} reactivó su cuenta",
-                ['entity_type' => 'user', 'entity_id' => (string) $user->id],
-            );
-        }
-
-        $tokenData = $this->tokens->issue($user);
 
         return response()->json([
             'message' => 'Cuenta reactivada correctamente.',
-            'data'    => [
-                ...$tokenData,
-                'user' => new UserResource($user->fresh()),
+            'data' => [
+                ...$result['tokens'],
+                'user' => new UserResource($result['user']),
             ],
         ]);
     }
 
     public function destroy(ConfirmPasswordRequest $request): JsonResponse
     {
-        $user = $request->user();
-
-        if ($user->family_id !== null) {
-            $this->notifications->notifyFamily(
-                $user,
-                'profile_updated',
-                'Cuenta eliminada',
-                "{$user->name} eliminó su cuenta permanentemente",
-                ['entity_type' => 'user', 'entity_id' => (string) $user->id],
-            );
-        }
-
-        DB::transaction(function () use ($user) {
-            $this->haltFamilyBillingIfNeeded($user, 'Cuenta eliminada permanentemente');
-
-            $this->tokens->revoke($user);
-
-            FamilyMember::query()
-                ->where('user_id', $user->id)
-                ->update(['status' => 'inactive']);
-
-            $user->update([
-                'account_status' => 'deleted',
-                'deactivated_at' => now(),
-                'name'           => 'Usuario eliminado',
-                'email'          => 'deleted_'.$user->id.'@deleted.zumifly.local',
-                'notification_preferences' => NotificationPreferences::defaults(),
-            ]);
-
-            $user->delete();
-        });
+        $this->deleteAccount->execute($request->user());
 
         return response()->json([
             'message' => 'Tu cuenta fue eliminada de forma permanente.',
         ]);
-    }
-
-    private function haltFamilyBillingIfNeeded(User $user, string $reason): void
-    {
-        if (! $this->subscriptionBilling->shouldHaltForUser($user)) {
-            return;
-        }
-
-        $family = Family::query()->with('subscription')->find($user->family_id);
-
-        if ($family === null) {
-            return;
-        }
-
-        $this->subscriptionBilling->haltFutureCharges($family, $user, $reason, notify: true);
     }
 }

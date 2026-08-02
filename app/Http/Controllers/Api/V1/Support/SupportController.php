@@ -4,23 +4,26 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1\Support;
 
-use App\Events\SupportTicketChanged;
+use App\Application\Support\Actions\AddSupportMessageAction;
+use App\Application\Support\Actions\CreateSupportTicketAction;
+use App\Application\Support\Actions\UpdateSupportTicketAction;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Concerns\ResolvesPagination;
 use App\Models\SupportTicket;
-use App\Models\SupportTicketMessage;
 use App\Models\User;
-use App\Services\FamilyNotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 class SupportController extends Controller
 {
     use ResolvesPagination;
 
-    public function __construct(private readonly FamilyNotificationService $notifications) {}
+    public function __construct(
+        private readonly CreateSupportTicketAction $createTicket,
+        private readonly AddSupportMessageAction $addMessageAction,
+        private readonly UpdateSupportTicketAction $updateTicket,
+    ) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -50,53 +53,20 @@ class SupportController extends Controller
 
     public function store(Request $request): JsonResponse
     {
-        if ($request->user()->canManageSupportTickets()) {
-            return response()->json(['message' => 'Los agentes de soporte no pueden crear tickets.'], 403);
-        }
-
         $validated = $request->validate([
-            'subject'  => ['required', 'string', 'max:255'],
+            'subject' => ['required', 'string', 'max:255'],
             'category' => ['nullable', 'string', Rule::in(['general', 'account', 'tasks', 'finance', 'technical'])],
-            'body'     => ['required', 'string', 'max:5000'],
+            'body' => ['required', 'string', 'max:5000'],
             'priority' => ['nullable', 'string', Rule::in(['low', 'normal', 'high'])],
         ]);
 
-        $user = $request->user();
+        $result = $this->createTicket->execute($request->user(), $validated);
 
-        $ticket = SupportTicket::query()->create([
-            'id'              => (string) Str::uuid(),
-            'family_id'       => $user->family_id,
-            'user_id'         => $user->id,
-            'subject'         => $validated['subject'],
-            'category'        => $validated['category'] ?? 'general',
-            'status'          => 'open',
-            'priority'        => $validated['priority'] ?? 'normal',
-            'last_message_at' => now(),
-        ]);
-
-        SupportTicketMessage::query()->create([
-            'id'        => (string) Str::uuid(),
-            'ticket_id' => $ticket->id,
-            'user_id'   => $user->id,
-            'body'      => $validated['body'],
-            'is_staff'  => false,
-        ]);
-
-        $ticket->load(['requester:id,name,email', 'assignee:id,name', 'messages.author:id,name']);
-
-        if ($user->family_id !== null) {
-            $this->notifications->notifyFamily(
-                $user,
-                'support_ticket',
-                'Ticket de soporte',
-                "{$user->name} abrió un ticket: {$ticket->subject}",
-                ['entity_type' => 'support_ticket', 'entity_id' => $ticket->id],
-            );
+        if (($result['ok'] ?? false) !== true) {
+            return response()->json(['message' => $result['message']], $result['status']);
         }
 
-        $this->broadcastTicketToStaff($ticket, 'created', (int) $user->id);
-
-        return response()->json(['data' => $ticket], 201);
+        return response()->json(['data' => $result['ticket']], 201);
     }
 
     public function show(Request $request, SupportTicket $ticket): JsonResponse
@@ -116,116 +86,34 @@ class SupportController extends Controller
             return response()->json(['message' => 'Forbidden'], 403);
         }
 
-        if ($ticket->status === 'closed' && ! $request->user()->canManageSupportTickets()) {
-            return response()->json(['message' => 'Este ticket está cerrado.'], 422);
-        }
-
         $validated = $request->validate([
             'body' => ['required', 'string', 'max:5000'],
         ]);
 
-        $user = $request->user();
-        $isStaff = $user->canManageSupportTickets();
+        $result = $this->addMessageAction->execute($request->user(), $ticket, $validated);
 
-        $message = SupportTicketMessage::query()->create([
-            'id'        => (string) Str::uuid(),
-            'ticket_id' => $ticket->id,
-            'user_id'   => $user->id,
-            'body'      => $validated['body'],
-            'is_staff'  => $isStaff,
-        ]);
-
-        $updates = ['last_message_at' => now()];
-
-        if ($isStaff && $ticket->status === 'open') {
-            $updates['status'] = 'in_progress';
+        if (($result['ok'] ?? false) !== true) {
+            return response()->json(['message' => $result['message']], $result['status']);
         }
 
-        if (! $isStaff && $ticket->status === 'waiting_user') {
-            $updates['status'] = 'in_progress';
-        }
-
-        if (! $isStaff && $ticket->status === 'resolved') {
-            $updates['status'] = 'in_progress';
-        }
-
-        if ($isStaff && $ticket->assigned_to === null) {
-            $updates['assigned_to'] = $user->id;
-        }
-
-        $ticket->update($updates);
-
-        $message->load('author:id,name');
-
-        if ($isStaff && $ticket->family_id !== null) {
-            $this->notifications->notifyFamilyById(
-                $ticket->family_id,
-                (int) $user->id,
-                'support_message',
-                'Respuesta de soporte',
-                "Soporte respondió en «{$ticket->subject}»",
-                ['entity_type' => 'support_ticket', 'entity_id' => $ticket->id],
-                [(int) $ticket->user_id],
-            );
-            event(new SupportTicketChanged(
-                recipientUserId: (int) $ticket->user_id,
-                ticketId: (string) $ticket->id,
-                action: 'message',
-                status: $ticket->status,
-                subject: $ticket->subject,
-                actorId: (int) $user->id,
-            ));
-        } elseif (! $isStaff && $user->family_id !== null) {
-            $this->notifications->notifyFamily(
-                $user,
-                'support_message',
-                'Mensaje en ticket',
-                "{$user->name} respondió en «{$ticket->subject}»",
-                ['entity_type' => 'support_ticket', 'entity_id' => $ticket->id],
-            );
-            $this->broadcastTicketToStaff($ticket, 'message', (int) $user->id);
-        }
-
-        return response()->json(['data' => $message], 201);
+        return response()->json(['data' => $result['message']], 201);
     }
 
     public function update(Request $request, SupportTicket $ticket): JsonResponse
     {
-        if (! $request->user()->canManageSupportTickets()) {
-            return response()->json(['message' => 'Forbidden'], 403);
-        }
-
         $validated = $request->validate([
-            'status'      => ['sometimes', 'string', Rule::in(['open', 'in_progress', 'waiting_user', 'resolved', 'closed'])],
-            'priority'    => ['sometimes', 'string', Rule::in(['low', 'normal', 'high'])],
+            'status' => ['sometimes', 'string', Rule::in(['open', 'in_progress', 'waiting_user', 'resolved', 'closed'])],
+            'priority' => ['sometimes', 'string', Rule::in(['low', 'normal', 'high'])],
             'assigned_to' => ['nullable', 'integer', 'exists:users,id'],
         ]);
 
-        $ticket->update($validated);
-        $ticket->load(['requester:id,name,email', 'assignee:id,name']);
+        $result = $this->updateTicket->execute($request->user(), $ticket, $validated);
 
-        if ($ticket->family_id !== null) {
-            $this->notifications->notifyFamilyById(
-                $ticket->family_id,
-                (int) $request->user()->id,
-                'support_ticket',
-                'Ticket actualizado',
-                "El estado de «{$ticket->subject}» cambió a {$ticket->status}",
-                ['entity_type' => 'support_ticket', 'entity_id' => $ticket->id],
-                [(int) $ticket->user_id],
-            );
+        if (($result['ok'] ?? false) !== true) {
+            return response()->json(['message' => $result['message']], $result['status']);
         }
 
-        event(new SupportTicketChanged(
-            recipientUserId: (int) $ticket->user_id,
-            ticketId: (string) $ticket->id,
-            action: 'updated',
-            status: $ticket->status,
-            subject: $ticket->subject,
-            actorId: (int) $request->user()->id,
-        ));
-
-        return response()->json(['data' => $ticket]);
+        return response()->json(['data' => $result['ticket']]);
     }
 
     private function canAccessTicket(User $user, SupportTicket $ticket): bool
@@ -235,24 +123,5 @@ class SupportController extends Controller
         }
 
         return (int) $ticket->user_id === (int) $user->id;
-    }
-
-    private function broadcastTicketToStaff(SupportTicket $ticket, string $action, int $actorId): void
-    {
-        $staffIds = User::query()
-            ->where('role', 'soporte')
-            ->pluck('id')
-            ->all();
-
-        foreach ($staffIds as $staffId) {
-            event(new SupportTicketChanged(
-                recipientUserId: (int) $staffId,
-                ticketId: (string) $ticket->id,
-                action: $action,
-                status: $ticket->status,
-                subject: $ticket->subject,
-                actorId: $actorId,
-            ));
-        }
     }
 }

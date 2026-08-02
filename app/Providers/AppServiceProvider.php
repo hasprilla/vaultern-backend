@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Domains\Subscription\Contracts\PaymentGatewayClient;
+use App\Infrastructure\Wompi\WompiHttpClient;
 use App\Models\Budget;
 use App\Models\Family;
 use App\Models\Task;
@@ -19,7 +21,7 @@ class AppServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        //
+        $this->app->bind(PaymentGatewayClient::class, WompiHttpClient::class);
     }
 
     public function boot(): void

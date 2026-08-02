@@ -11,8 +11,8 @@ use App\Http\Controllers\Api\V1\Ocr\OcrController;
 use App\Http\Controllers\Api\V1\Profile\ProfileController;
 use App\Http\Controllers\Api\V1\School\SchoolBroadcastController;
 use App\Http\Controllers\Api\V1\School\SchoolEnrollmentController;
-use App\Http\Controllers\Api\V1\Subscription\MercadoPagoWebhookController;
 use App\Http\Controllers\Api\V1\Subscription\SubscriptionController;
+use App\Http\Controllers\Api\V1\Subscription\WompiWebhookController;
 use App\Http\Controllers\Api\V1\Support\SupportController;
 use App\Http\Controllers\Api\V1\Task\TaskController;
 use Illuminate\Support\Facades\Route;
@@ -31,9 +31,10 @@ Route::get('/v1/health', function () {
     return response()->json($payload, $payload['status'] === 'ok' ? 200 : 503);
 });
 
-// Mercado Pago: webhook público + página de retorno WebView.
-Route::post('/v1/webhooks/mercadopago', MercadoPagoWebhookController::class);
-Route::get('/v1/subscriptions/mp/return', [SubscriptionController::class, 'mercadoPagoReturn']);
+// Wompi: webhook público + launch/return WebView.
+Route::post('/v1/webhooks/wompi', WompiWebhookController::class);
+Route::get('/v1/subscriptions/wompi/pay/{payment}', [SubscriptionController::class, 'wompiPay']);
+Route::get('/v1/subscriptions/wompi/return', [SubscriptionController::class, 'wompiReturn']);
 
 Route::prefix('v1/auth')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
@@ -126,8 +127,8 @@ Route::prefix('v1')->middleware(['api.auth', 'tenant'])->group(function () {
     Route::get('/subscriptions/payments', [SubscriptionController::class, 'payments']);
     Route::get('/subscriptions/payments/{payment}', [SubscriptionController::class, 'showPayment']);
     Route::post('/subscriptions/checkout', [SubscriptionController::class, 'checkout']);
-    Route::post('/subscriptions/checkout/mp', [SubscriptionController::class, 'checkoutMercadoPago']);
-    Route::post('/subscriptions/payments/{payment}/mp-sync', [SubscriptionController::class, 'syncMercadoPagoPayment']);
+    Route::post('/subscriptions/checkout/wompi', [SubscriptionController::class, 'checkoutWompi']);
+    Route::post('/subscriptions/payments/{payment}/wompi-sync', [SubscriptionController::class, 'syncWompiPayment']);
     Route::post('/subscriptions/cancel', [SubscriptionController::class, 'cancel']);
     Route::post('/subscriptions/resume', [SubscriptionController::class, 'resume']);
 
