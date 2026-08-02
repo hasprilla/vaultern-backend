@@ -12,9 +12,13 @@ class AttachmentResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        // URL autenticada (fiable en móvil/cPanel sin depender del symlink /storage).
+        $apiFileUrl = $request->getSchemeAndHttpHost().'/api/v1/attachments/'.$this->id.'/file';
+
         return [
             'id' => (string) $this->id,
-            'url' => $this->url($request),
+            'url' => $apiFileUrl,
+            'public_url' => $this->url($request),
             'mime_type' => $this->mime_type,
             'original_name' => $this->original_name,
             'size' => (int) $this->size,

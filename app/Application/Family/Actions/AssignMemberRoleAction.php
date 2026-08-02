@@ -25,7 +25,10 @@ final class AssignMemberRoleAction
      */
     public function execute(User $actor, Family $family, string $memberId, array $validated): array
     {
-        if (! $actor->isFamilyOwner()) {
+        $isOwner = $actor->isFamilyOwner()
+            || ($family->owner_user_id !== null
+                && (int) $family->owner_user_id === (int) $actor->id);
+        if (! $isOwner) {
             return [
                 'ok' => false,
                 'status' => 403,

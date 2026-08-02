@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\Family\Actions;
 
+use App\Models\Family;
 use App\Models\FamilyMember;
 use App\Models\User;
 use App\Services\FamilyNotificationService;
@@ -23,7 +24,12 @@ final class ReactivateMemberAction
      */
     public function execute(User $actor, string $familyId, string $memberId): array
     {
-        if (! $actor->isFamilyOwner()) {
+        $family = Family::query()->find($familyId);
+        $isOwner = $actor->isFamilyOwner()
+            || ($family !== null
+                && $family->owner_user_id !== null
+                && (int) $family->owner_user_id === (int) $actor->id);
+        if (! $isOwner) {
             return [
                 'ok' => false,
                 'status' => 403,

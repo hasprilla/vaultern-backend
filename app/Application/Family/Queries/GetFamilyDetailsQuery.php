@@ -42,6 +42,20 @@ final class GetFamilyDetailsQuery
             $isOwner = true;
         }
 
+        // Si la columna está vacía, auto-asignar al viewer cuando es el primer padre/madre.
+        if (! $isOwner && $family->owner_user_id === null
+            && in_array($viewer->role, ['padre', 'madre'], true)) {
+            $firstParentId = User::query()
+                ->where('family_id', $family->id)
+                ->whereIn('role', ['padre', 'madre'])
+                ->orderBy('id')
+                ->value('id');
+            if ($firstParentId !== null && (int) $firstParentId === (int) $viewer->id) {
+                $family->forceFill(['owner_user_id' => $viewer->id])->save();
+                $isOwner = true;
+            }
+        }
+
         $with = SchemaCompat::hasTable('child_guardians')
             ? ['user.guardians']
             : ['user'];

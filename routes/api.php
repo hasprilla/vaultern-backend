@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\V1\School\SchoolEnrollmentController;
 use App\Http\Controllers\Api\V1\Subscription\SubscriptionController;
 use App\Http\Controllers\Api\V1\Subscription\WompiWebhookController;
 use App\Http\Controllers\Api\V1\Support\SupportController;
+use App\Http\Controllers\Api\V1\Shared\AttachmentFileController;
 use App\Http\Controllers\Api\V1\Task\TaskController;
 use Illuminate\Support\Facades\Route;
 
@@ -80,6 +81,8 @@ Route::prefix('v1')->middleware(['api.auth', 'tenant'])->group(function () {
     Route::get('/families/{family}/messages', [ParentMessageController::class, 'index']);
     Route::post('/families/{family}/messages', [ParentMessageController::class, 'store']);
     Route::patch('/families/{family}/messages/{message}/read', [ParentMessageController::class, 'markRead']);
+
+    Route::get('/attachments/{attachment}/file', [AttachmentFileController::class, 'show']);
 
     Route::apiResource('tasks', TaskController::class);
     Route::patch('/tasks/{task}/complete', [TaskController::class, 'complete']);
