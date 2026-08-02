@@ -7,12 +7,15 @@ namespace App\Application\Task\Actions;
 use App\Models\Task;
 use App\Models\User;
 use App\Services\FamilyNotificationService;
+use App\Services\TaskVisibilityService;
 use App\Support\FamilyRealtime;
+use Illuminate\Validation\ValidationException;
 
 final class UpdateTaskAction
 {
     public function __construct(
         private readonly FamilyNotificationService $notifications,
+        private readonly TaskVisibilityService $visibility,
     ) {}
 
     /**
@@ -20,6 +23,15 @@ final class UpdateTaskAction
      */
     public function execute(User $actor, Task $task, array $validated): Task
     {
+        if (array_key_exists('assigned_to', $validated)) {
+            $assigneeId = $validated['assigned_to'] !== null ? (int) $validated['assigned_to'] : null;
+            if (! $this->visibility->canAssignTo($actor, $assigneeId)) {
+                throw ValidationException::withMessages([
+                    'assigned_to' => 'Solo puedes asignar tareas a hijos de los que eres custodio.',
+                ]);
+            }
+        }
+
         $task->update($validated);
         $task = $task->fresh(['creator', 'assignee']);
 

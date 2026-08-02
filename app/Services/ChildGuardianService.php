@@ -75,16 +75,13 @@ class ChildGuardianService
             return [];
         }
 
-        // Dueño (o fallback pre-migración) ve todos los hijos.
-        if ($parent->isFamilyOwner()) {
-            return $this->allChildIdsInFamily($parent->family_id);
-        }
-
         // Compat cPanel: sin tabla, todos los padres ven a todos los hijos del núcleo.
         if (! SchemaCompat::hasTable('child_guardians')) {
             return $this->allChildIdsInFamily($parent->family_id);
         }
 
+        // Solo custodios explícitos (el dueño no ve datos de hijos ajenos
+        // salvo que también esté como custodio).
         return ChildGuardian::query()
             ->where('parent_user_id', $parent->id)
             ->pluck('child_user_id')
@@ -117,12 +114,8 @@ class ChildGuardianService
 
     public function isGuardianOf(User $parent, int $childId): bool
     {
-        if ($parent->isFamilyOwner() && $parent->family_id !== null) {
-            return User::query()
-                ->where('id', $childId)
-                ->where('family_id', $parent->family_id)
-                ->where('role', 'hijo')
-                ->exists();
+        if ($parent->family_id === null) {
+            return false;
         }
 
         if (! SchemaCompat::hasTable('child_guardians')) {

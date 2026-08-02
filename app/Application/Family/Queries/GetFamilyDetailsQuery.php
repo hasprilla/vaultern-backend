@@ -32,7 +32,8 @@ final class GetFamilyDetailsQuery
     public function execute(User $viewer): array
     {
         $family = Family::query()->findOrFail($viewer->family_id);
-        $isOwner = $family->isOwnedBy($viewer);
+        // Alineado con User::isFamilyOwner (incluye fallback pre-migración).
+        $isOwner = $viewer->isFamilyOwner();
 
         $with = SchemaCompat::hasTable('child_guardians')
             ? ['user.guardians']
@@ -58,12 +59,16 @@ final class GetFamilyDetailsQuery
         $members = $membersQuery->get();
         $myChildIds = $this->guardians->childIdsFor($viewer);
 
-        $visible = $members->filter(function (FamilyMember $m) use ($viewer, $myChildIds) {
+        $visible = $members->filter(function (FamilyMember $m) use ($viewer, $myChildIds, $isOwner) {
             $user = $m->user;
             if ($user === null) {
                 return false;
             }
             if ($user->role !== 'hijo') {
+                return true;
+            }
+            // Dueño ve todos los hijos para administrar custodios / acceso.
+            if ($isOwner) {
                 return true;
             }
             if (! in_array($viewer->role, ['padre', 'madre', 'tutor'], true)) {

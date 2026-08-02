@@ -82,16 +82,8 @@ class FamilyNotificationService
             return;
         }
 
-        $recipientIds = $this->guardians->guardianIdsOfChild($childUserId);
-
-        // El dueño de la membresía siempre recibe alertas de cualquier hijo.
-        $ownerId = Family::query()
-            ->where('id', $actor->family_id)
-            ->value('owner_user_id');
-        if ($ownerId !== null) {
-            $recipientIds[] = (int) $ownerId;
-            $recipientIds = array_values(array_unique($recipientIds));
-        }
+        // Solo custodios explícitos del hijo (no fan-out al dueño si no es custodio).
+        $recipientIds = array_values(array_unique($this->guardians->guardianIdsOfChild($childUserId)));
 
         $this->enqueue(
             $actor->family_id,

@@ -39,6 +39,7 @@ class TaskController extends Controller
     public function index(Request $request): JsonResponse
     {
         $tasks = $this->listTasks->execute(
+            $request->user(),
             [
                 'assigned_to' => $request->input('assigned_to'),
                 'status' => $request->input('status'),

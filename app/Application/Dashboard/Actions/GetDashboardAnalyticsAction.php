@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace App\Application\Dashboard\Actions;
 
-use App\Models\Task;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\ChildGuardianService;
+use App\Services\TaskVisibilityService;
 use App\Support\FamilyRealtime;
 use Illuminate\Support\Facades\Cache;
 
@@ -15,6 +15,7 @@ final class GetDashboardAnalyticsAction
 {
     public function __construct(
         private readonly ChildGuardianService $guardians,
+        private readonly TaskVisibilityService $taskVisibility,
     ) {}
 
     /**
@@ -44,9 +45,11 @@ final class GetDashboardAnalyticsAction
 
             $from = now()->subDays($days)->startOfDay();
 
-            $tasksTotal = Task::query()->where('created_at', '>=', $from)->count();
-            $tasksDone = Task::query()->where('status', 'done')->where('completed_at', '>=', $from)->count();
-            $tasksOverdue = Task::query()
+            $scoped = $this->taskVisibility->scopedQuery($user);
+
+            $tasksTotal = (clone $scoped)->where('created_at', '>=', $from)->count();
+            $tasksDone = (clone $scoped)->where('status', 'done')->where('completed_at', '>=', $from)->count();
+            $tasksOverdue = (clone $scoped)
                 ->where('status', '!=', 'done')
                 ->where(function ($builder) {
                     $builder->where('status', 'overdue')

@@ -7,13 +7,16 @@ namespace App\Application\Task\Actions;
 use App\Models\Task;
 use App\Models\User;
 use App\Services\FamilyNotificationService;
+use App\Services\TaskVisibilityService;
 use App\Support\FamilyRealtime;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 final class CreateTaskAction
 {
     public function __construct(
         private readonly FamilyNotificationService $notifications,
+        private readonly TaskVisibilityService $visibility,
     ) {}
 
     /**
@@ -29,6 +32,13 @@ final class CreateTaskAction
      */
     public function execute(User $actor, array $validated): Task
     {
+        $assigneeId = isset($validated['assigned_to']) ? (int) $validated['assigned_to'] : null;
+        if (! $this->visibility->canAssignTo($actor, $assigneeId)) {
+            throw ValidationException::withMessages([
+                'assigned_to' => 'Solo puedes asignar tareas a hijos de los que eres custodio.',
+            ]);
+        }
+
         $task = Task::query()->create([
             'id' => (string) Str::uuid(),
             'family_id' => $actor->family_id,

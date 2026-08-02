@@ -5,16 +5,23 @@ declare(strict_types=1);
 namespace App\Application\Task\Queries;
 
 use App\Models\Task;
+use App\Models\User;
+use App\Services\TaskVisibilityService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
 final class ListTasksQuery
 {
+    public function __construct(
+        private readonly TaskVisibilityService $visibility,
+    ) {}
+
     /**
      * @param  array{assigned_to?: string|null, status?: string|null}  $filters
      */
-    public function execute(array $filters, int $perPage): LengthAwarePaginator
+    public function execute(User $viewer, array $filters, int $perPage): LengthAwarePaginator
     {
-        $query = Task::query()->with(['creator', 'assignee', 'attachments']);
+        $query = $this->visibility->scopedQuery($viewer)
+            ->with(['creator', 'assignee', 'attachments']);
 
         if (! empty($filters['assigned_to'])) {
             $query->where('assigned_to', $filters['assigned_to']);

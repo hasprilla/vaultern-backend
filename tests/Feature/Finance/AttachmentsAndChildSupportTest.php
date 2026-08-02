@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Tests\Feature\Finance;
 
 use App\Models\ChildSupportAgreement;
-use App\Models\Subscription;
 use App\Models\User;
+use App\Services\ChildGuardianService;
 use App\Support\SubscriptionPlanCatalog;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -90,7 +90,7 @@ class AttachmentsAndChildSupportTest extends TestCase
 
     private function createChild($family, User $parent): User
     {
-        return User::query()->create([
+        $child = User::query()->create([
             'name' => 'Hijo Test',
             'email' => 'hijo'.Str::random(6).'@example.com',
             'password' => bcrypt('password'),
@@ -98,5 +98,9 @@ class AttachmentsAndChildSupportTest extends TestCase
             'family_id' => $family->id,
             'email_verified_at' => now(),
         ]);
+
+        app(ChildGuardianService::class)->syncForChild($child, [(int) $parent->id]);
+
+        return $child;
     }
 }
