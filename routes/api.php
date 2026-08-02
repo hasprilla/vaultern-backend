@@ -44,15 +44,19 @@ Route::prefix('v1/auth')->group(function () {
     Route::post('/resend-verification', [AuthController::class, 'resendVerification']);
     Route::post('/join', [AuthController::class, 'join']);
     Route::post('/login', [AuthController::class, 'login']);
+    Route::post('/device/verify', [AuthController::class, 'verifyDevice']);
+    Route::get('/device/security-questions', [AuthController::class, 'securityQuestions']);
     Route::post('/mfa/verify', [MfaController::class, 'verify']);
     Route::post('/account/reactivate', [ProfileController::class, 'reactivate']);
     Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
     Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 });
 
-Route::prefix('v1')->middleware(['api.auth', 'tenant'])->group(function () {
+Route::prefix('v1')->middleware(['api.auth', 'device.recovery', 'tenant'])->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::get('/auth/me', [AuthController::class, 'me']);
+    Route::post('/auth/device/recovery', [AuthController::class, 'setupDeviceRecovery']);
+    Route::get('/auth/device/security-questions', [AuthController::class, 'securityQuestions']);
     Route::post('/auth/refresh', [AuthController::class, 'refresh']);
 
     Route::patch('/profile', [ProfileController::class, 'update']);

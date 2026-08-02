@@ -10,6 +10,9 @@ use App\Application\Auth\JoinFamilyAction;
 use App\Application\Auth\LoginUserAction;
 use App\Application\Auth\PasswordResetService;
 use App\Application\Auth\RegisterUserAction;
+use App\Application\Auth\SetupDeviceRecoveryAction;
+use App\Application\Auth\VerifyDeviceChallengeAction;
+use App\Support\DeviceSecurityQuestions;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\Auth\ForgotPasswordRequest;
 use App\Http\Requests\Api\V1\Auth\JoinFamilyRequest;
@@ -35,6 +38,8 @@ class AuthController extends Controller
         private readonly LoginUserAction $loginUser,
         private readonly RegisterUserAction $registerUser,
         private readonly JoinFamilyAction $joinFamily,
+        private readonly SetupDeviceRecoveryAction $setupDeviceRecoveryAction,
+        private readonly VerifyDeviceChallengeAction $verifyDeviceChallengeAction,
     ) {}
 
     public function register(RegisterRequest $request): JsonResponse
@@ -148,6 +153,76 @@ class AuthController extends Controller
                 ...$result['tokens'],
                 'user' => $result['user'],
             ]),
+        ]);
+    }
+
+    public function securityQuestions(): JsonResponse
+    {
+        return response()->json(['data' => DeviceSecurityQuestions::list()]);
+    }
+
+    public function verifyDevice(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'user_id' => ['required', 'integer', 'exists:users,id'],
+            'challenge_token' => ['required', 'string', 'min:32', 'max:128'],
+            'device_id' => ['required', 'string', 'max:255'],
+            'platform' => ['nullable', 'string', 'in:android,ios,web'],
+            'fcm_token' => ['nullable', 'string', 'max:512'],
+            'secret' => ['nullable', 'string', 'min:8', 'max:128'],
+            'security_answer' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $result = $this->verifyDeviceChallengeAction->execute($validated);
+
+        if (($result['ok'] ?? false) !== true) {
+            $payload = ['message' => $result['message']];
+            if (isset($result['code'])) {
+                $payload['code'] = $result['code'];
+            }
+
+            return response()->json($payload, $result['status']);
+        }
+
+        if (($result['requires_mfa'] ?? false) === true) {
+            return response()->json([
+                'message' => 'Ingresa el código de autenticación en dos pasos.',
+                'code' => 'requires_mfa',
+                'data' => [
+                    'user_id' => $result['user']->id,
+                    'must_rotate_device_secret' => true,
+                ],
+            ], 403);
+        }
+
+        return response()->json([
+            'data' => new SessionResource([
+                ...$result['tokens'],
+                'user' => $result['user'],
+            ]),
+            'meta' => [
+                'must_rotate_device_secret' => true,
+            ],
+        ]);
+    }
+
+    public function setupDeviceRecovery(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'secret' => ['required', 'string', 'min:8', 'max:128'],
+            'security_question_key' => ['required', 'string', 'max:64'],
+            'security_answer' => ['required', 'string', 'min:2', 'max:255'],
+        ]);
+
+        $result = $this->setupDeviceRecoveryAction->execute($request->user(), $validated);
+
+        if (($result['ok'] ?? false) !== true) {
+            return response()->json(['message' => $result['message']], $result['status']);
+        }
+
+        return response()->json([
+            'message' => 'Clave secreta y pregunta de seguridad guardadas.',
+            'data' => new UserResource($request->user()->fresh()),
         ]);
     }
 

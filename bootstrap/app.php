@@ -32,6 +32,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'api.auth' => \App\Http\Middleware\ApiAuthenticate::class,
             'tenant'   => \App\Http\Middleware\TenantMiddleware::class,
+            'device.recovery' => \App\Http\Middleware\EnsureDeviceRecovery::class,
         ]);
 
         $middleware->appendToGroup('api', [

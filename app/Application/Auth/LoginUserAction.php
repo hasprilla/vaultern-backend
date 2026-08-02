@@ -8,10 +8,11 @@ use App\Infrastructure\Auth\TokenService;
 use App\Models\FamilyJoinRequest;
 use App\Models\FamilyMember;
 use App\Models\User;
+use App\Support\DeviceSecurityQuestions;
 use Illuminate\Support\Facades\Hash;
 
 /**
- * @phpstan-type LoginSuccess array{ok: true, user: User, tokens: array<string, mixed>}
+ * @phpstan-type LoginSuccess array{ok: true, user: User, tokens: array<string, mixed>, must_setup_device_recovery?: bool, must_rotate_device_secret?: bool}
  * @phpstan-type LoginFailure array{ok: false, status: int, message: string, code?: string, data?: array<string, mixed>}
  */
 final class LoginUserAction
@@ -19,6 +20,7 @@ final class LoginUserAction
     public function __construct(
         private readonly TokenService $tokens,
         private readonly DeviceRegistrationService $devices,
+        private readonly DeviceChallengeService $challenges,
     ) {}
 
     /**
@@ -81,13 +83,35 @@ final class LoginUserAction
             ];
         }
 
-        // Desactivar en un núcleo ≠ bloquear login. Solo account_status lo hace.
-        // Si el núcleo actual está inactivo, apunta a otro donde siga activo.
         $user->ensureActiveFamilyContext();
 
         $deviceId = $credentials['device_id'] ?? null;
-        if (is_string($deviceId) && $deviceId !== '') {
-            $this->devices->register(
+        $hasDeviceId = is_string($deviceId) && $deviceId !== '';
+
+        // Dispositivo nuevo + recuperación configurada → challenge (clave o pregunta).
+        if ($hasDeviceId
+            && $user->hasDeviceRecoveryConfigured()
+            && ! $this->devices->isTrustedDevice($user, $deviceId)) {
+            $challengeToken = $this->challenges->issue((int) $user->id);
+            $questionKey = (string) $user->security_question_key;
+
+            return [
+                'ok' => false,
+                'status' => 403,
+                'message' => 'Detectamos un dispositivo nuevo. Confirma tu identidad con la clave secreta o la pregunta de seguridad.',
+                'code' => 'requires_device_verification',
+                'data' => [
+                    'user_id' => $user->id,
+                    'challenge_token' => $challengeToken,
+                    'security_question_key' => $questionKey,
+                    'security_question' => DeviceSecurityQuestions::label($questionKey),
+                ],
+            ];
+        }
+
+        // Dispositivo conocido o primer acceso (aún sin recuperación): registrar como trusted.
+        if ($hasDeviceId) {
+            $this->devices->registerTrusted(
                 $user,
                 $deviceId,
                 $credentials['platform'] ?? null,
@@ -107,8 +131,10 @@ final class LoginUserAction
 
         return [
             'ok' => true,
-            'user' => $user,
+            'user' => $user->fresh() ?? $user,
             'tokens' => $this->tokens->issue($user),
+            'must_setup_device_recovery' => ! $user->hasDeviceRecoveryConfigured(),
+            'must_rotate_device_secret' => (bool) $user->device_secret_must_rotate,
         ];
     }
 }

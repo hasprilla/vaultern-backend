@@ -9,6 +9,7 @@ use App\Models\FamilyJoinRequest;
 use App\Models\FamilyMember;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Tests\Concerns\AuthenticatesUsers;
 use Tests\TestCase;
@@ -179,6 +180,10 @@ class FamilyApiTest extends TestCase
             'role' => 'madre',
             'email' => 'madre.desactivar@yopmail.com',
             'name' => 'Madre Activa',
+            'device_secret_hash' => Hash::make('test-device-secret'),
+            'security_question_key' => 'pet_name',
+            'security_answer_hash' => Hash::make('firulais'),
+            'device_secret_must_rotate' => false,
         ]);
 
         FamilyMember::query()->create([

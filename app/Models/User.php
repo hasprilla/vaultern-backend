@@ -30,6 +30,10 @@ class User extends Authenticatable
         'mfa_enabled',
         'mfa_secret',
         'device_fingerprint',
+        'device_secret_hash',
+        'security_question_key',
+        'security_answer_hash',
+        'device_secret_must_rotate',
         'account_status',
         'deactivated_at',
         'notification_preferences',
@@ -39,18 +43,41 @@ class User extends Authenticatable
         'password',
         'remember_token',
         'mfa_secret',
+        'device_secret_hash',
+        'security_answer_hash',
     ];
 
     protected function casts(): array
     {
         return [
-            'email_verified_at'        => 'datetime',
-            'deactivated_at'           => 'datetime',
-            'password'                 => 'hashed',
-            'mfa_enabled'              => 'boolean',
-            'mfa_secret'               => 'encrypted',
-            'notification_preferences' => 'array',
+            'email_verified_at'          => 'datetime',
+            'deactivated_at'             => 'datetime',
+            'password'                   => 'hashed',
+            'mfa_enabled'                => 'boolean',
+            'mfa_secret'                 => 'encrypted',
+            'device_secret_must_rotate'  => 'boolean',
+            'notification_preferences'   => 'array',
         ];
+    }
+
+    public function hasDeviceRecoveryConfigured(): bool
+    {
+        return is_string($this->device_secret_hash)
+            && $this->device_secret_hash !== ''
+            && is_string($this->security_question_key)
+            && $this->security_question_key !== ''
+            && is_string($this->security_answer_hash)
+            && $this->security_answer_hash !== '';
+    }
+
+    public function mustSetupDeviceRecovery(): bool
+    {
+        return ! $this->hasDeviceRecoveryConfigured();
+    }
+
+    public function mustRotateDeviceSecret(): bool
+    {
+        return (bool) $this->device_secret_must_rotate;
     }
 
     /** @return array<string, bool> */

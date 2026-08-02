@@ -23,6 +23,9 @@ class UserResource extends JsonResource
             'email_verified'  => $this->email_verified_at !== null,
             'account_status'  => $this->account_status ?? 'active',
             'deactivated_at'  => $this->deactivated_at?->toIso8601String(),
+            'device_recovery_configured' => $this->hasDeviceRecoveryConfigured(),
+            'device_recovery_setup_required' => $this->mustSetupDeviceRecovery(),
+            'device_secret_must_rotate' => $this->mustRotateDeviceSecret(),
             'notification_preferences' => $this->resolvedNotificationPreferences(),
             'created_at'      => $this->created_at?->toIso8601String(),
         ];
