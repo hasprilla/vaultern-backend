@@ -9,6 +9,7 @@ use App\Application\Support\Actions\CreateSupportTicketAction;
 use App\Application\Support\Actions\UpdateSupportTicketAction;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Concerns\ResolvesPagination;
+use App\Models\SubscriptionPayment;
 use App\Models\SupportTicket;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
@@ -68,7 +69,7 @@ class SupportController extends Controller
             return response()->json(['message' => $result['message']], $result['status']);
         }
 
-        return response()->json(['data' => $result['ticket']], 201);
+        return response()->json(['data' => $this->ticketPayload($result['ticket'])], 201);
     }
 
     public function show(Request $request, SupportTicket $ticket): JsonResponse
@@ -79,7 +80,7 @@ class SupportController extends Controller
 
         $ticket->load(['requester:id,name,email', 'assignee:id,name', 'messages.author:id,name']);
 
-        return response()->json(['data' => $ticket]);
+        return response()->json(['data' => $this->ticketPayload($ticket)]);
     }
 
     public function addMessage(Request $request, SupportTicket $ticket): JsonResponse
@@ -125,5 +126,28 @@ class SupportController extends Controller
         }
 
         return (int) $ticket->user_id === (int) $user->id;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function ticketPayload(SupportTicket $ticket): array
+    {
+        $data = $ticket->toArray();
+
+        if ($ticket->entity_type === 'subscription_payment' && filled($ticket->entity_id)) {
+            $payment = SubscriptionPayment::query()->find($ticket->entity_id);
+            if ($payment !== null) {
+                $data['related_payment'] = [
+                    'id' => $payment->id,
+                    'payment_reference' => $payment->payment_reference,
+                    'amount_cents' => $payment->amount_cents,
+                    'currency' => $payment->currency,
+                    'status' => $payment->status,
+                ];
+            }
+        }
+
+        return $data;
     }
 }
