@@ -24,11 +24,14 @@ final class SyncChildGuardiansAction
      */
     public function execute(User $actor, string $familyId, User $child, array $guardianIds): array
     {
-        if (! $actor->isFamilyOwner()) {
+        $isOwner = $actor->isFamilyOwner();
+        $isGuardian = $this->guardians->isGuardianOf($actor, (int) $child->id);
+        // Dueño, o custodio ya autorizado sobre ese hijo (a quien el dueño dio permiso).
+        if (! $isOwner && ! $isGuardian) {
             return [
                 'ok' => false,
                 'status' => 403,
-                'message' => 'Solo el dueño de la membresía puede definir quién ve la información de cada hijo.',
+                'message' => 'Solo el dueño o un custodio de este hijo puede definir quién ve su información.',
             ];
         }
 
