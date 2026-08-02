@@ -8,32 +8,19 @@ use Illuminate\Support\Facades\Schema;
 
 /**
  * Compatibilidad cPanel: el código puede desplegarse antes de correr migraciones.
- * Cachea hasTable/hasColumn por request/proceso PHP-FPM.
+ *
+ * No cacheamos en estáticos de proceso PHP-FPM: tras un migrate, workers viejos
+ * seguirían creyendo que faltan columnas (o al revés) hasta reiniciar FPM.
  */
 final class SchemaCompat
 {
-    /** @var array<string, bool> */
-    private static array $columns = [];
-
-    /** @var array<string, bool> */
-    private static array $tables = [];
-
     public static function hasColumn(string $table, string $column): bool
     {
-        $key = $table.'.'.$column;
-        if (! array_key_exists($key, self::$columns)) {
-            self::$columns[$key] = Schema::hasColumn($table, $column);
-        }
-
-        return self::$columns[$key];
+        return Schema::hasColumn($table, $column);
     }
 
     public static function hasTable(string $table): bool
     {
-        if (! array_key_exists($table, self::$tables)) {
-            self::$tables[$table] = Schema::hasTable($table);
-        }
-
-        return self::$tables[$table];
+        return Schema::hasTable($table);
     }
 }
