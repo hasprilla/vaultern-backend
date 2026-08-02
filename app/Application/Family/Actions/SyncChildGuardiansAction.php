@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\Family\Actions;
 
+use App\Models\Family;
 use App\Models\FamilyMember;
 use App\Models\User;
 use App\Services\ChildGuardianService;
@@ -24,14 +25,18 @@ final class SyncChildGuardiansAction
      */
     public function execute(User $actor, string $familyId, User $child, array $guardianIds): array
     {
-        $isOwner = $actor->isFamilyOwner();
+        $family = Family::query()->find($familyId);
+        $isOwner = $actor->isFamilyOwner()
+            || ($family !== null
+                && $family->owner_user_id !== null
+                && (int) $family->owner_user_id === (int) $actor->id);
         $isGuardian = $this->guardians->isGuardianOf($actor, (int) $child->id);
-        // Dueño, o custodio ya autorizado sobre ese hijo (a quien el dueño dio permiso).
+        // Dueño de la membresía, o custodio ya autorizado sobre ese hijo.
         if (! $isOwner && ! $isGuardian) {
             return [
                 'ok' => false,
                 'status' => 403,
-                'message' => 'Solo el dueño o un custodio de este hijo puede definir quién ve su información.',
+                'message' => 'Solo el dueño de la membresía o un custodio de este hijo puede definir quién ve su información.',
             ];
         }
 

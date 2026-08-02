@@ -32,8 +32,15 @@ final class GetFamilyDetailsQuery
     public function execute(User $viewer): array
     {
         $family = Family::query()->findOrFail($viewer->family_id);
-        // Alineado con User::isFamilyOwner (incluye fallback pre-migración).
+        // Alineado con User::isFamilyOwner (incluye fallback / auto-asignación).
         $isOwner = $viewer->isFamilyOwner();
+        $family->refresh();
+
+        // Cinturón y tirantes: si owner_user_id coincide, es dueño aunque el cache falle.
+        if (! $isOwner && $family->owner_user_id !== null
+            && (int) $family->owner_user_id === (int) $viewer->id) {
+            $isOwner = true;
+        }
 
         $with = SchemaCompat::hasTable('child_guardians')
             ? ['user.guardians']
