@@ -5,41 +5,59 @@ declare(strict_types=1);
 namespace App\Application\Subscription\Actions;
 
 use App\Models\Family;
+use App\Models\FamilyPaymentMethod;
 use App\Models\User;
-use App\Services\FamilyNotificationService;
+use App\Services\FamilyPaymentMethodService;
 use App\Services\SubscriptionBillingService;
 
 /**
- * @phpstan-type DeleteSuccess array{ok: true}
- * @phpstan-type DeleteFailure array{ok: false, status: int, message: string}
+ * Compat: elimina todas las tarjetas activas de la familia (endpoint singular antiguo).
  */
 final class DeleteSavedPaymentMethodAction
 {
     public function __construct(
+        private readonly FamilyPaymentMethodService $paymentMethods,
         private readonly SubscriptionBillingService $billing,
-        private readonly FamilyNotificationService $notifications,
     ) {}
 
     /**
-     * @return DeleteSuccess|DeleteFailure
+     * @return array{ok: bool, status?: int, message?: string}
      */
     public function execute(Family $family, User $user): array
     {
-        $subscription = $family->subscription;
-        if ($subscription === null || $subscription->renewal_card_last4 === null) {
+        $methods = $this->paymentMethods->listActive($family);
+        $hasMirror = $family->subscription?->renewal_card_last4 !== null;
+
+        if ($methods->isEmpty() && ! $hasMirror) {
             return ['ok' => false, 'status' => 404, 'message' => 'No hay una tarjeta guardada.'];
         }
 
-        $this->billing->clearPaymentMethod($subscription);
+        foreach ($methods as $method) {
+            $this->paymentMethods->delete($family, $method, $user);
+        }
 
-        $this->notifications->notifyFamilyById(
-            (string) $family->id,
-            null,
-            'payment_method_removed',
-            'Tarjeta eliminada',
-            "{$user->name} eliminó la tarjeta guardada para renovaciones. No se realizarán cobros automáticos hasta que se guarde otra.",
-            ['entity_type' => 'subscription', 'entity_id' => $subscription->id],
-        );
+        if ($family->subscription !== null) {
+            $this->billing->clearPaymentMethod($family->subscription);
+        }
+
+        return ['ok' => true];
+    }
+
+    /**
+     * @return array{ok: bool, status?: int, message?: string}
+     */
+    public function executeOne(Family $family, User $user, string $methodId): array
+    {
+        $method = FamilyPaymentMethod::query()
+            ->where('family_id', $family->id)
+            ->where('id', $methodId)
+            ->first();
+
+        if ($method === null) {
+            return ['ok' => false, 'status' => 404, 'message' => 'Método de pago no encontrado.'];
+        }
+
+        $this->paymentMethods->delete($family, $method, $user);
 
         return ['ok' => true];
     }

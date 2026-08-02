@@ -22,7 +22,15 @@ final class StartWompiCheckoutAction
         string $planCode,
         string $billing,
         bool $saveCard = true,
+        ?string $paymentMethodId = null,
     ): array {
-        return $this->checkout->startCheckout($family, $user, $planCode, $billing, $saveCard);
+        return $this->checkout->startCheckout(
+            $family,
+            $user,
+            $planCode,
+            $billing,
+            $saveCard,
+            $paymentMethodId,
+        );
     }
 }

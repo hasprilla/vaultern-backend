@@ -14,6 +14,8 @@ use App\Application\Subscription\StartWompiCheckoutAction;
 use App\Application\Subscription\SyncWompiPaymentAction;
 use App\Application\Subscription\WompiCheckoutService;
 use App\Http\Requests\Api\V1\Subscription\StartWompiCheckoutRequest;
+use App\Models\FamilyPaymentMethod;
+use App\Services\FamilyPaymentMethodService;
 use App\Services\PlanFeatureService;
 use App\Services\SubscriptionBillingService;
 use App\Services\SubscriptionCancelService;
@@ -37,6 +39,7 @@ class SubscriptionController extends Controller
         private readonly SyncWompiPaymentAction $syncWompiPaymentAction,
         private readonly GetPaymentReceiptAction $getPaymentReceiptAction,
         private readonly DeleteSavedPaymentMethodAction $deleteSavedPaymentMethod,
+        private readonly FamilyPaymentMethodService $paymentMethods,
         private readonly SubscriptionCancelService $cancelService,
         private readonly SubscriptionRenewalService $renewalService,
         private readonly SubscriptionBillingService $billingService,
@@ -102,8 +105,13 @@ class SubscriptionController extends Controller
         $subscription = $family->subscription;
         $features = $this->planFeatures->featuresForFamily($family);
 
+        $methods = $this->paymentMethods->listActiveApi($family);
+        $defaultId = collect($methods)->firstWhere('is_default', true)['id'] ?? null;
+
         $savedMethod = null;
-        if ($subscription?->renewal_card_last4) {
+        if ($defaultId !== null) {
+            $savedMethod = collect($methods)->firstWhere('id', $defaultId);
+        } elseif ($subscription?->renewal_card_last4) {
             $savedMethod = [
                 'brand' => $subscription->renewal_card_brand,
                 'last4' => $subscription->renewal_card_last4,
@@ -129,7 +137,11 @@ class SubscriptionController extends Controller
                 'access_until' => $subscription?->accessUntilDate(),
                 'free_from' => $subscription?->freeFromDate()?->toDateString(),
                 'auto_renew' => $subscription?->canAutoRenew() ?? false,
+                'past_due' => $subscription?->isPastDue() ?? false,
+                'renewal_grace_ends_at' => $subscription?->renewal_grace_ends_at?->toIso8601String(),
                 'saved_payment_method' => $savedMethod,
+                'saved_payment_methods' => $methods,
+                'default_payment_method_id' => $defaultId,
             ],
         ]);
     }
@@ -141,22 +153,106 @@ class SubscriptionController extends Controller
             return response()->json(['message' => 'Familia no encontrada'], 404);
         }
 
-        $subscription = $family->subscription;
-        if ($subscription === null || $subscription->renewal_card_last4 === null) {
-            return response()->json(['data' => null]);
+        $methods = $this->paymentMethods->listActiveApi($family);
+        $default = collect($methods)->firstWhere('is_default', true) ?? ($methods[0] ?? null);
+
+        return response()->json(['data' => $default]);
+    }
+
+    public function paymentMethods(Request $request): JsonResponse
+    {
+        $family = $this->resolveFamily($request);
+        if ($family === null) {
+            return response()->json(['message' => 'Familia no encontrada'], 404);
         }
 
         return response()->json([
-            'data' => [
-                'brand' => $subscription->renewal_card_brand,
-                'last4' => $subscription->renewal_card_last4,
-                'holder_name' => $subscription->renewal_card_holder_name,
-                'masked' => CardMask::display(
-                    $subscription->renewal_card_brand,
-                    $subscription->renewal_card_last4,
-                ),
-            ],
+            'data' => $this->paymentMethods->listActiveApi($family),
         ]);
+    }
+
+    public function storePaymentMethod(Request $request): JsonResponse
+    {
+        $family = $this->resolveFamily($request);
+        if ($family === null) {
+            return response()->json(['message' => 'Familia no encontrada'], 404);
+        }
+
+        $validated = $request->validate([
+            'token' => ['nullable', 'string', 'max:120'],
+            'last4' => ['required', 'string', 'size:4'],
+            'brand' => ['nullable', 'string', 'max:20'],
+            'holder_name' => ['nullable', 'string', 'max:120'],
+            'customer_email' => ['nullable', 'email'],
+            'make_default' => ['nullable', 'boolean'],
+            // Simulado: número completo solo para validar y guardar last4 (nunca se persiste PAN).
+            'card_number' => ['nullable', 'string', 'min:13', 'max:23'],
+            'exp_month' => ['nullable', 'integer', 'min:1', 'max:12'],
+            'exp_year' => ['nullable', 'integer'],
+            'cvc' => ['nullable', 'string', 'min:3', 'max:4'],
+            'cardholder_name' => ['nullable', 'string', 'min:3', 'max:120'],
+        ]);
+
+        $makeDefault = (bool) ($validated['make_default'] ?? true);
+
+        if (filled($validated['token'] ?? null)) {
+            $method = $this->paymentMethods->createFromWompiToken($family, $request->user(), [
+                'token' => $validated['token'],
+                'last4' => $validated['last4'],
+                'brand' => $validated['brand'] ?? null,
+                'holder' => $validated['holder_name'] ?? null,
+                'customer_email' => $validated['customer_email'] ?? null,
+            ], $makeDefault);
+        } else {
+            if (config('wompi.enabled')) {
+                return response()->json([
+                    'message' => 'Con Wompi activo debes enviar un token de tarjeta (tok_…).',
+                ], 422);
+            }
+
+            $cardMeta = app(\App\Services\SimulatedCardPaymentService::class)->validate([
+                'card_number' => $validated['card_number'] ?? '',
+                'exp_month' => $validated['exp_month'] ?? 0,
+                'exp_year' => $validated['exp_year'] ?? 0,
+                'cvc' => $validated['cvc'] ?? '',
+                'cardholder_name' => $validated['cardholder_name'] ?? ($validated['holder_name'] ?? ''),
+            ]);
+
+            $method = $this->paymentMethods->createSimulated($family, $request->user(), $cardMeta, $makeDefault);
+        }
+
+        return response()->json(['data' => $method->toApiArray()], 201);
+    }
+
+    public function setDefaultPaymentMethod(Request $request, FamilyPaymentMethod $paymentMethod): JsonResponse
+    {
+        $family = $this->resolveFamily($request);
+        if ($family === null) {
+            return response()->json(['message' => 'Familia no encontrada'], 404);
+        }
+
+        if ($paymentMethod->family_id !== $family->id) {
+            return response()->json(['message' => 'Método de pago no encontrado'], 404);
+        }
+
+        $method = $this->paymentMethods->setDefault($family, $paymentMethod);
+
+        return response()->json(['data' => $method->toApiArray()]);
+    }
+
+    public function destroyPaymentMethod(Request $request, FamilyPaymentMethod $paymentMethod): JsonResponse
+    {
+        $family = $this->resolveFamily($request);
+        if ($family === null) {
+            return response()->json(['message' => 'Familia no encontrada'], 404);
+        }
+
+        $result = $this->deleteSavedPaymentMethod->executeOne($family, $request->user(), $paymentMethod->id);
+        if (($result['ok'] ?? false) !== true) {
+            return response()->json(['message' => $result['message']], $result['status']);
+        }
+
+        return response()->json(['message' => 'Tarjeta eliminada.']);
     }
 
     public function deletePaymentMethod(Request $request): JsonResponse
@@ -192,11 +288,12 @@ class SubscriptionController extends Controller
             'billing' => ['nullable', 'string', 'in:monthly,yearly'],
             'simulated' => ['nullable', 'boolean'],
             'save_card' => ['nullable', 'boolean'],
-            'card_number' => ['required', 'string', 'min:13', 'max:23'],
-            'exp_month' => ['required', 'integer', 'min:1', 'max:12'],
-            'exp_year' => ['required', 'integer', 'min:'.(int) date('Y'), 'max:'.((int) date('Y') + 20)],
-            'cvc' => ['required', 'string', 'min:3', 'max:4'],
-            'cardholder_name' => ['required', 'string', 'min:3', 'max:120'],
+            'payment_method_id' => ['nullable', 'uuid'],
+            'card_number' => ['required_without:payment_method_id', 'string', 'min:13', 'max:23'],
+            'exp_month' => ['required_without:payment_method_id', 'integer', 'min:1', 'max:12'],
+            'exp_year' => ['required_without:payment_method_id', 'integer', 'min:'.(int) date('Y'), 'max:'.((int) date('Y') + 20)],
+            'cvc' => ['required_without:payment_method_id', 'string', 'min:3', 'max:4'],
+            'cardholder_name' => ['required_without:payment_method_id', 'string', 'min:3', 'max:120'],
         ]);
 
         $result = $this->checkoutService->checkout($family, $request->user(), $validated);
@@ -227,6 +324,7 @@ class SubscriptionController extends Controller
             (string) $validated['plan_code'],
             (string) ($validated['billing'] ?? 'monthly'),
             array_key_exists('save_card', $validated) ? (bool) $validated['save_card'] : true,
+            isset($validated['payment_method_id']) ? (string) $validated['payment_method_id'] : null,
         );
 
         return response()->json([

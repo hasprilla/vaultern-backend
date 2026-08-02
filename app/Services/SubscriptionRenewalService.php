@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Infrastructure\Wompi\WompiHttpClient;
+use App\Models\FamilyPaymentMethod;
 use App\Models\Subscription;
 use App\Models\SubscriptionPayment;
 use App\Models\SubscriptionPaymentEvent;
@@ -11,13 +13,17 @@ use App\Models\SubscriptionPlan;
 use App\Models\User;
 use App\Support\SubscriptionPeriod;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use RuntimeException;
 
 class SubscriptionRenewalService
 {
     public function __construct(
         private readonly SimulatedCardPaymentService $cardPayments,
+        private readonly FamilyPaymentMethodService $paymentMethods,
+        private readonly WompiHttpClient $wompi,
         private readonly FamilyNotificationService $notifications,
     ) {}
 
@@ -28,10 +34,10 @@ class SubscriptionRenewalService
     {
         $stats = ['processed' => 0, 'renewed' => 0, 'failed' => 0, 'expired' => 0];
 
+        // Active vencidas con métodos / past_due en gracia.
         Subscription::query()
-            ->where('status', 'active')
+            ->whereIn('status', ['active', 'past_due'])
             ->whereNull('cancelled_at')
-            ->whereNotNull('renewal_card_last4')
             ->whereNotNull('current_period_end')
             ->whereDate('current_period_end', '<', now()->toDateString())
             ->with('family')
@@ -48,16 +54,26 @@ class SubscriptionRenewalService
                 }
             });
 
-        // Wompi / sin tarjeta / canceladas al vencer: expirar y avisar a toda la familia.
+        // Sin métodos cobrables / canceladas al vencer: a free (sin intentar cobro).
         Subscription::query()
-            ->whereIn('status', ['active', 'cancelled'])
+            ->whereIn('status', ['active', 'cancelled', 'past_due'])
             ->whereNotNull('current_period_end')
             ->whereDate('current_period_end', '<', now()->toDateString())
             ->with(['family', 'renewalUser'])
             ->orderBy('current_period_end')
             ->chunkById(50, function ($subscriptions) use (&$stats) {
                 foreach ($subscriptions as $subscription) {
+                    if ($subscription->status === 'past_due' && ! $subscription->graceExpired()) {
+                        continue;
+                    }
                     if ($subscription->isDueForRenewal()) {
+                        continue;
+                    }
+                    // past_due con gracia vencida ya se maneja en renew(); aquí solo leftovers.
+                    if ($subscription->status === 'past_due' && $subscription->graceExpired()) {
+                        continue;
+                    }
+                    if ($subscription->status === 'expired') {
                         continue;
                     }
 
@@ -75,169 +91,407 @@ class SubscriptionRenewalService
     }
 
     /**
-     * @return bool|null true=renewed, false=failed, null=skipped
+     * @return bool|null true=renewed, false=failed/expired, null=skipped
      */
     public function renew(Subscription $subscription): ?bool
     {
-        if (! $subscription->isDueForRenewal()) {
-            return null;
-        }
+        return DB::transaction(function () use ($subscription) {
+            /** @var Subscription|null $locked */
+            $locked = Subscription::query()
+                ->whereKey($subscription->id)
+                ->lockForUpdate()
+                ->first();
 
-        $subscription->loadMissing('family');
-        $family = $subscription->family;
+            if ($locked === null) {
+                return null;
+            }
 
-        if ($family === null) {
-            return null;
-        }
+            $locked->loadMissing('family');
+            $family = $locked->family;
+            if ($family === null) {
+                return null;
+            }
 
-        $this->hydrateRenewalCardFromLastPayment($subscription);
+            // Anti pago doble: si ya se renovó este periodo, salir.
+            if ($locked->current_period_end !== null
+                && now()->toDateString() <= $locked->current_period_end->toDateString()
+                && $locked->status === 'active') {
+                return null;
+            }
 
-        if ($subscription->renewal_card_last4 === null) {
-            $this->expireSubscription($subscription, 'No hay método de pago guardado para renovar.');
-
-            return false;
-        }
-
-        $plan = SubscriptionPlan::query()
-            ->where('code', $subscription->plan_code)
-            ->where('is_active', true)
-            ->first();
-
-        if ($plan === null) {
-            $this->expireSubscription($subscription, 'El plan ya no está disponible.');
-
-            return false;
-        }
-
-        $billing = $subscription->billing ?? 'monthly';
-        $amountCents = $billing === 'yearly'
-            ? ($plan->price_yearly_cents ?? $plan->price_monthly_cents * 12)
-            : $plan->price_monthly_cents;
-
-        $user = User::query()->find($subscription->renewal_user_id)
-            ?? $family->users()->orderBy('created_at')->first();
-
-        if ($user === null) {
-            $this->expireSubscription($subscription, 'No se encontró un usuario para la renovación.');
-
-            return false;
-        }
-
-        $reference = 'ZMF-'.strtoupper(Str::random(12));
-        $previousPeriodEnd = $subscription->current_period_end;
-        $newPeriodEnd = SubscriptionPeriod::periodEndFrom(
-            SubscriptionPeriod::freeFromAfter($previousPeriodEnd),
-            $billing,
-        );
-
-        return DB::transaction(function () use (
-            $subscription,
-            $family,
-            $user,
-            $plan,
-            $billing,
-            $amountCents,
-            $reference,
-            $newPeriodEnd,
-        ) {
-            $payment = SubscriptionPayment::query()->create([
-                'id' => (string) Str::uuid(),
-                'family_id' => $family->id,
-                'subscription_id' => $subscription->id,
-                'user_id' => $user->id,
-                'plan_code' => $plan->code,
-                'billing' => $billing,
-                'amount_cents' => $amountCents,
-                'currency' => $plan->currency,
-                'status' => 'pending',
-                'provider' => $subscription->provider === 'simulated' ? 'simulated' : 'manual',
-                'payment_reference' => $reference,
-                'card_brand' => $subscription->renewal_card_brand,
-                'card_last4' => $subscription->renewal_card_last4,
-                'card_holder_name' => $subscription->renewal_card_holder_name,
-                'metadata' => ['mode' => 'renewal', 'auto_renew' => true],
-            ]);
-
-            $this->logEvent($payment, $user, 'renewal_initiated', 'Renovación automática iniciada', [
-                'plan_code' => $plan->code,
-                'billing' => $billing,
-                'amount_cents' => $amountCents,
-            ]);
-
-            try {
-                $this->cardPayments->simulateCharge($subscription->renewal_card_last4);
-
-                $payment->update([
-                    'status' => 'succeeded',
-                    'paid_at' => now(),
-                ]);
-
-                $this->logEvent($payment, $user, 'renewal_succeeded', 'Renovación automática exitosa', [
-                    'payment_reference' => $reference,
-                    'current_period_end' => $newPeriodEnd->toIso8601String(),
-                ]);
-
-                $subscription->update([
-                    'status' => 'active',
-                    'current_period_end' => $newPeriodEnd,
-                    'cancelled_at' => null,
-                ]);
-
-                $family->update(['plan' => $plan->code]);
-
-                $this->notifications->notifyFamilyById(
-                    (string) $family->id,
-                    null,
-                    'subscription_renewed',
-                    'Suscripción renovada',
-                    "El plan {$plan->name} se renovó automáticamente (ref. {$reference}). Próximo vencimiento: {$newPeriodEnd->toDateString()}.",
-                    ['entity_type' => 'subscription', 'entity_id' => $subscription->id],
-                );
+            $periodKey = $locked->renewalPeriodKey();
+            if ($periodKey !== null && $this->hasSucceededRenewalForPeriod($locked, $periodKey)) {
+                $this->markRenewedFromExistingPayment($locked, $periodKey);
 
                 return true;
-            } catch (ValidationException $e) {
-                $reason = collect($e->errors())->flatten()->first() ?? 'Pago de renovación rechazado';
+            }
 
-                $payment->update([
-                    'status' => 'failed',
-                    'failure_reason' => $reason,
+            // No intentar si hay un cobro de renovación pendiente (en vuelo).
+            if ($periodKey !== null && $this->hasInFlightRenewalForPeriod($locked, $periodKey)) {
+                Log::info('subscription.renewal.skip_inflight', [
+                    'subscription_id' => $locked->id,
+                    'period_key' => $periodKey,
                 ]);
 
-                $this->logEvent($payment, $user, 'renewal_failed', $reason, [
-                    'errors' => $e->errors(),
-                ]);
+                return null;
+            }
 
-                $this->expireSubscription($subscription, $reason, $user, $reference);
+            $methods = $this->paymentMethods->chargeableOrdered($family);
+            if ($methods->isEmpty() && $locked->renewal_card_last4 !== null) {
+                // Compat: mirror legacy sin fila en family_payment_methods.
+                $methods = collect([
+                    new FamilyPaymentMethod([
+                        'id' => 'legacy-mirror',
+                        'family_id' => $family->id,
+                        'user_id' => $locked->renewal_user_id,
+                        'provider' => $locked->provider === 'wompi' ? 'wompi' : 'simulated',
+                        'provider_payment_source_id' => null,
+                        'brand' => $locked->renewal_card_brand,
+                        'last4' => $locked->renewal_card_last4,
+                        'holder_name' => $locked->renewal_card_holder_name,
+                        'is_default' => true,
+                        'status' => 'active',
+                    ]),
+                ]);
+                // Legacy wompi without source is not chargeable.
+                $methods = $methods->filter(fn (FamilyPaymentMethod $m) => $m->isChargeable())->values();
+            }
+
+            if ($methods->isEmpty()) {
+                if ($locked->status === 'past_due' && ! $locked->graceExpired()) {
+                    return null;
+                }
+                $this->expireSubscription($locked, 'No hay método de pago cobrable para renovar.');
 
                 return false;
             }
+
+            if ($locked->status === 'active') {
+                $graceEnds = ($locked->current_period_end ?? now())->copy()->addDays(2);
+                $locked->update([
+                    'status' => 'past_due',
+                    'renewal_grace_ends_at' => $graceEnds,
+                ]);
+                $locked->refresh();
+            }
+
+            if ($locked->graceExpired()) {
+                $this->expireSubscription(
+                    $locked,
+                    'No se pudo cobrar la renovación en el periodo de gracia (48 h).',
+                    null,
+                    null,
+                    'grace_expired',
+                );
+
+                return false;
+            }
+
+            $plan = SubscriptionPlan::query()
+                ->where('code', $locked->plan_code)
+                ->where('is_active', true)
+                ->first();
+
+            if ($plan === null) {
+                $this->expireSubscription($locked, 'El plan ya no está disponible.');
+
+                return false;
+            }
+
+            $billing = $locked->billing ?? 'monthly';
+            $amountCents = $billing === 'yearly'
+                ? ($plan->price_yearly_cents ?? $plan->price_monthly_cents * 12)
+                : $plan->price_monthly_cents;
+
+            $user = User::query()->find($locked->renewal_user_id)
+                ?? $family->users()->orderBy('created_at')->first();
+
+            if ($user === null) {
+                $this->expireSubscription($locked, 'No se encontró un usuario para la renovación.');
+
+                return false;
+            }
+
+            $previousPeriodEnd = $locked->current_period_end;
+            $newPeriodEnd = SubscriptionPeriod::periodEndFrom(
+                SubscriptionPeriod::freeFromAfter($previousPeriodEnd),
+                $billing,
+            );
+
+            $lastFailure = null;
+
+            foreach ($methods as $method) {
+                // Re-check anti doble antes de cada intento de tarjeta.
+                if ($periodKey !== null && $this->hasSucceededRenewalForPeriod($locked, $periodKey)) {
+                    $this->markRenewedFromExistingPayment($locked, $periodKey);
+
+                    return true;
+                }
+
+                $reference = 'ZMF-R-'.strtoupper(Str::random(10));
+                $payment = SubscriptionPayment::query()->create([
+                    'id' => (string) Str::uuid(),
+                    'family_id' => $family->id,
+                    'subscription_id' => $locked->id,
+                    'user_id' => $user->id,
+                    'plan_code' => $plan->code,
+                    'billing' => $billing,
+                    'amount_cents' => $amountCents,
+                    'currency' => $plan->currency,
+                    'status' => 'pending',
+                    'provider' => $method->provider === 'wompi' ? 'wompi' : 'simulated',
+                    'payment_reference' => $reference,
+                    'card_brand' => $method->brand,
+                    'card_last4' => $method->last4,
+                    'card_holder_name' => $method->holder_name,
+                    'metadata' => [
+                        'mode' => 'renewal',
+                        'auto_renew' => true,
+                        'period_key' => $periodKey,
+                        'payment_method_id' => $method->id,
+                    ],
+                ]);
+
+                $this->logEvent($payment, $user, 'renewal_attempt', 'Intento de renovación automática', [
+                    'plan_code' => $plan->code,
+                    'billing' => $billing,
+                    'amount_cents' => $amountCents,
+                    'payment_method_id' => $method->id,
+                    'card_last4' => $method->last4,
+                    'period_key' => $periodKey,
+                ]);
+
+                try {
+                    $chargeStatus = $this->chargeMethod(
+                        $method,
+                        $payment,
+                        $user,
+                        $amountCents,
+                        (string) $plan->currency,
+                        $reference,
+                    );
+
+                    // PENDING: no probar más tarjetas (evitar cobro doble si Wompi aprueba luego).
+                    if ($chargeStatus === 'pending') {
+                        $this->logEvent($payment, $user, 'renewal_pending', 'Cobro en proceso; no se reintentará otra tarjeta', [
+                            'period_key' => $periodKey,
+                            'payment_method_id' => $method->id,
+                        ]);
+
+                        return null;
+                    }
+
+                    // Barrera final anti doble: si otro proceso ya cobró, no marcar success otra vez.
+                    if ($periodKey !== null && $this->hasSucceededRenewalForPeriod($locked, $periodKey, $payment->id)) {
+                        $payment->update([
+                            'status' => 'failed',
+                            'failure_reason' => 'Cobro omitido: el periodo ya fue renovado (anti pago doble).',
+                        ]);
+                        $this->logEvent($payment, $user, 'renewal_duplicate_blocked', 'Pago doble bloqueado', [
+                            'period_key' => $periodKey,
+                        ]);
+
+                        return true;
+                    }
+
+                    $payment->update([
+                        'status' => 'succeeded',
+                        'paid_at' => now(),
+                    ]);
+
+                    $this->logEvent($payment, $user, 'renewal_succeeded', 'Renovación automática exitosa', [
+                        'payment_reference' => $reference,
+                        'current_period_end' => $newPeriodEnd->toIso8601String(),
+                        'period_key' => $periodKey,
+                    ]);
+
+                    $locked->update([
+                        'status' => 'active',
+                        'current_period_end' => $newPeriodEnd,
+                        'cancelled_at' => null,
+                        'renewal_grace_ends_at' => null,
+                        'renewal_card_last4' => $method->last4,
+                        'renewal_card_brand' => $method->brand,
+                        'renewal_card_holder_name' => $method->holder_name,
+                        'renewal_user_id' => $method->user_id ?? $user->id,
+                    ]);
+
+                    if ($method->exists && $method->id !== 'legacy-mirror') {
+                        $this->paymentMethods->setDefault($family, $method);
+                    }
+
+                    $family->update(['plan' => $plan->code]);
+
+                    $this->notifications->notifyFamilyById(
+                        (string) $family->id,
+                        null,
+                        'subscription_renewed',
+                        'Suscripción renovada',
+                        "El plan {$plan->name} se renovó automáticamente (ref. {$reference}). Próximo vencimiento: {$newPeriodEnd->toDateString()}.",
+                        ['entity_type' => 'subscription', 'entity_id' => $locked->id],
+                    );
+
+                    return true;
+                } catch (ValidationException|RuntimeException $e) {
+                    $reason = $e instanceof ValidationException
+                        ? (collect($e->errors())->flatten()->first() ?? 'Pago de renovación rechazado')
+                        : $e->getMessage();
+                    $lastFailure = $reason;
+
+                    $payment->update([
+                        'status' => 'failed',
+                        'failure_reason' => $reason,
+                    ]);
+
+                    $this->logEvent($payment, $user, 'renewal_failed', $reason, [
+                        'payment_method_id' => $method->id,
+                        'card_last4' => $method->last4,
+                        'period_key' => $periodKey,
+                    ]);
+                }
+            }
+
+            // Todas fallaron; si aún hay gracia, esperar siguiente cron.
+            if (! $locked->graceExpired()) {
+                $this->notifications->notifyFamilyById(
+                    (string) $family->id,
+                    null,
+                    'subscription_renewal_retry',
+                    'Reintentando cobro',
+                    'No se pudo renovar con las tarjetas guardadas. Reintentaremos hasta '
+                        .($locked->renewal_grace_ends_at?->toDateTimeString() ?? '48 h')
+                        .'. Motivo: '.($lastFailure ?? 'pago rechazado'),
+                    ['entity_type' => 'subscription', 'entity_id' => $locked->id],
+                );
+
+                return false;
+            }
+
+            $this->expireSubscription(
+                $locked,
+                $lastFailure ?? 'No se pudo cobrar la renovación.',
+                $user,
+                null,
+                'grace_expired',
+            );
+
+            return false;
         });
     }
 
-    private function hydrateRenewalCardFromLastPayment(Subscription $subscription): void
+    /**
+     * @return 'approved'|'pending'
+     */
+    private function chargeMethod(
+        FamilyPaymentMethod $method,
+        SubscriptionPayment $payment,
+        User $user,
+        int $amountCents,
+        string $currency,
+        string $reference,
+    ): string {
+        if ($method->provider === 'wompi') {
+            if (! filled($method->provider_payment_source_id)) {
+                throw new RuntimeException('La tarjeta Wompi no tiene payment_source_id cobrable.');
+            }
+
+            $tx = $this->wompi->chargePaymentSource(
+                $method->provider_payment_source_id,
+                $amountCents,
+                $currency,
+                $reference,
+                (string) $user->email,
+            );
+
+            $status = strtoupper((string) ($tx['status'] ?? ''));
+            $payment->update([
+                'metadata' => array_merge($payment->metadata ?? [], [
+                    'wompi_transaction' => [
+                        'id' => $tx['id'] ?? null,
+                        'status' => $tx['status'] ?? null,
+                    ],
+                ]),
+            ]);
+
+            if ($status === 'APPROVED') {
+                return 'approved';
+            }
+
+            if ($status === 'PENDING') {
+                // Deja el payment en pending; in-flight bloquea nuevos intentos del mismo periodo.
+                return 'pending';
+            }
+
+            throw new RuntimeException('Wompi rechazó el cobro ('.$status.').');
+        }
+
+        $this->cardPayments->simulateCharge((string) $method->last4);
+
+        return 'approved';
+    }
+
+    private function hasSucceededRenewalForPeriod(
+        Subscription $subscription,
+        string $periodKey,
+        ?string $exceptPaymentId = null,
+    ): bool {
+        $query = SubscriptionPayment::query()
+            ->where('subscription_id', $subscription->id)
+            ->where('status', 'succeeded')
+            ->where('metadata->mode', 'renewal')
+            ->where('metadata->period_key', $periodKey);
+
+        if ($exceptPaymentId !== null) {
+            $query->where('id', '!=', $exceptPaymentId);
+        }
+
+        return $query->exists();
+    }
+
+    private function hasInFlightRenewalForPeriod(Subscription $subscription, string $periodKey): bool
     {
-        if ($subscription->renewal_card_last4 !== null) {
+        return SubscriptionPayment::query()
+            ->where('subscription_id', $subscription->id)
+            ->where('status', 'pending')
+            ->where('metadata->mode', 'renewal')
+            ->where('metadata->period_key', $periodKey)
+            ->where('created_at', '>=', now()->subMinutes(15))
+            ->exists();
+    }
+
+    private function markRenewedFromExistingPayment(Subscription $subscription, string $periodKey): void
+    {
+        if ($subscription->status === 'active'
+            && $subscription->current_period_end !== null
+            && now()->toDateString() <= $subscription->current_period_end->toDateString()) {
             return;
         }
 
-        $lastPayment = $subscription->payments()
+        $payment = SubscriptionPayment::query()
+            ->where('subscription_id', $subscription->id)
             ->where('status', 'succeeded')
-            ->whereNotNull('card_last4')
+            ->where('metadata->mode', 'renewal')
+            ->where('metadata->period_key', $periodKey)
             ->orderByDesc('paid_at')
             ->first();
 
-        if ($lastPayment === null) {
+        if ($payment === null) {
             return;
         }
 
-        $subscription->update([
-            'renewal_card_last4' => $lastPayment->card_last4,
-            'renewal_card_brand' => $lastPayment->card_brand,
-            'renewal_card_holder_name' => $lastPayment->card_holder_name,
-            'renewal_user_id' => $lastPayment->user_id,
-        ]);
+        $billing = $subscription->billing ?? 'monthly';
+        $newPeriodEnd = SubscriptionPeriod::periodEndFrom(
+            SubscriptionPeriod::freeFromAfter($subscription->current_period_end),
+            $billing,
+        );
 
-        $subscription->refresh();
+        $subscription->update([
+            'status' => 'active',
+            'current_period_end' => $newPeriodEnd,
+            'cancelled_at' => null,
+            'renewal_grace_ends_at' => null,
+        ]);
+        $subscription->family?->update(['plan' => $subscription->plan_code]);
     }
 
     private function expireSubscription(
@@ -245,9 +499,13 @@ class SubscriptionRenewalService
         string $reason,
         ?User $user = null,
         ?string $reference = null,
+        string $eventType = 'subscription_expired',
     ): void {
         $subscription->loadMissing('family');
-        $subscription->update(['status' => 'expired']);
+        $subscription->update([
+            'status' => 'expired',
+            'renewal_grace_ends_at' => null,
+        ]);
         $subscription->family?->reconcileSubscriptionPlan();
 
         $family = $subscription->family;
@@ -256,11 +514,12 @@ class SubscriptionRenewalService
         }
 
         $suffix = $reference ? " (ref. {$reference})" : '';
+        $title = $eventType === 'grace_expired' ? 'Pasaste al plan Free' : 'Suscripción vencida';
         $this->notifications->notifyFamilyById(
             (string) $family->id,
             null,
-            'subscription_expired',
-            'Suscripción vencida',
+            $eventType === 'grace_expired' ? 'subscription_grace_expired' : 'subscription_expired',
+            $title,
             "El plan {$subscription->plan_code} venció. {$reason}{$suffix}",
             [
                 'entity_type' => 'subscription',

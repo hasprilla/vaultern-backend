@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace App\Application\Subscription;
 
 use App\Domains\Subscription\Contracts\PaymentGatewayClient;
+use App\Infrastructure\Wompi\WompiHttpClient;
 use App\Models\Family;
 use App\Models\SubscriptionPayment;
 use App\Models\SubscriptionPaymentEvent;
 use App\Models\SubscriptionPlan;
 use App\Models\User;
 use App\Services\FamilyNotificationService;
+use App\Services\FamilyPaymentMethodService;
 use App\Services\SubscriptionCheckoutService;
 use App\Support\CardMask;
 use App\Support\SubscriptionChangePolicy;
@@ -25,6 +27,8 @@ class WompiCheckoutService
 {
     public function __construct(
         private readonly PaymentGatewayClient $client,
+        private readonly WompiHttpClient $wompiHttp,
+        private readonly FamilyPaymentMethodService $paymentMethods,
         private readonly SubscriptionCheckoutService $checkoutService,
         private readonly FamilyNotificationService $notifications,
     ) {}
@@ -38,6 +42,7 @@ class WompiCheckoutService
         string $planCode,
         string $billing,
         bool $saveCard = true,
+        ?string $paymentMethodId = null,
     ): array {
         if (! $this->client->isConfigured()) {
             throw ValidationException::withMessages([
@@ -75,6 +80,19 @@ class WompiCheckoutService
         $currency = strtoupper((string) ($plan->currency ?: 'COP'));
         $reference = 'ZMF-'.strtoupper(Str::random(12));
         $appUrl = rtrim((string) config('app.url'), '/');
+
+        if ($paymentMethodId !== null && $paymentMethodId !== '') {
+            return $this->chargeSavedPaymentMethod(
+                $family,
+                $user,
+                $plan,
+                $billing,
+                $amountCents,
+                $currency,
+                $reference,
+                $paymentMethodId,
+            );
+        }
 
         return DB::transaction(function () use (
             $family,
@@ -389,6 +407,23 @@ class WompiCheckoutService
                     return;
                 }
 
+                // Renovación automática: no reactivar como checkout nuevo (anti periodo/doble cobro).
+                if (($payment->metadata['mode'] ?? null) === 'renewal') {
+                    if ($payment->status !== 'succeeded') {
+                        $payment->update([
+                            'status' => 'succeeded',
+                            'paid_at' => now(),
+                            'failure_reason' => null,
+                        ]);
+                    }
+                    // El cron con period_key detectará el éxito y extenderá el periodo una sola vez.
+                    app(\App\Services\SubscriptionRenewalService::class)->renew(
+                        $family->subscription ?? $payment->subscription,
+                    );
+
+                    return;
+                }
+
                 $cardMeta = CardMask::fromWompiTransaction($tx);
                 $saveCard = (bool) (($payment->metadata ?? [])['save_card'] ?? false);
 
@@ -434,6 +469,142 @@ class WompiCheckoutService
             $this->logEvent($payment, $user, 'payment_pending', 'Pago pendiente en Wompi', [
                 'wompi_transaction_id' => $wompiTransactionId,
                 'wompi_status' => $status,
+            ]);
+        });
+    }
+
+    /**
+     * Cobro inmediato con payment source guardado (sin WebView).
+     *
+     * @return array{checkout_url: string|null, payment_id: string, reference: string, payment: SubscriptionPayment}
+     */
+    private function chargeSavedPaymentMethod(
+        Family $family,
+        User $user,
+        SubscriptionPlan $plan,
+        string $billing,
+        int $amountCents,
+        string $currency,
+        string $reference,
+        string $paymentMethodId,
+    ): array {
+        $method = $this->paymentMethods->findForFamily($family, $paymentMethodId);
+        if ($method === null || ! $method->isChargeable() || $method->provider !== 'wompi') {
+            throw ValidationException::withMessages([
+                'payment_method_id' => 'La tarjeta seleccionada no es cobrable con Wompi.',
+            ]);
+        }
+
+        return DB::transaction(function () use (
+            $family,
+            $user,
+            $plan,
+            $billing,
+            $amountCents,
+            $currency,
+            $reference,
+            $method,
+        ) {
+            $payment = SubscriptionPayment::query()->create([
+                'id' => (string) Str::uuid(),
+                'family_id' => $family->id,
+                'subscription_id' => $family->subscription?->id,
+                'user_id' => $user->id,
+                'plan_code' => $plan->code,
+                'billing' => $billing,
+                'amount_cents' => $amountCents,
+                'currency' => $currency,
+                'status' => 'pending',
+                'provider' => 'wompi',
+                'payment_reference' => $reference,
+                'card_brand' => $method->brand,
+                'card_last4' => $method->last4,
+                'card_holder_name' => $method->holder_name,
+                'metadata' => [
+                    'mode' => 'wompi_saved',
+                    'save_card' => false,
+                    'payment_method_id' => $method->id,
+                ],
+            ]);
+
+            $this->logEvent($payment, $user, 'payment_initiated', 'Cobro con tarjeta guardada', [
+                'payment_method_id' => $method->id,
+                'amount_cents' => $amountCents,
+            ]);
+
+            try {
+                $tx = $this->wompiHttp->chargePaymentSource(
+                    (string) $method->provider_payment_source_id,
+                    $amountCents,
+                    $currency,
+                    $reference,
+                    (string) $user->email,
+                );
+            } catch (RuntimeException $e) {
+                $payment->update([
+                    'status' => 'failed',
+                    'failure_reason' => $e->getMessage(),
+                ]);
+                $this->logEvent($payment, $user, 'payment_failed', $e->getMessage());
+
+                throw ValidationException::withMessages([
+                    'payment_method_id' => $e->getMessage(),
+                ]);
+            }
+
+            $status = strtoupper((string) ($tx['status'] ?? ''));
+            $meta = $payment->metadata ?? [];
+            $meta['wompi_transaction'] = [
+                'id' => $tx['id'] ?? null,
+                'status' => $tx['status'] ?? null,
+            ];
+            $payment->update(['metadata' => $meta]);
+
+            if ($status === 'APPROVED') {
+                $this->checkoutService->activateFromSuccessfulPayment(
+                    $family,
+                    $user,
+                    $payment,
+                    $plan,
+                    $billing,
+                    'wompi',
+                    [
+                        'last4' => $method->last4,
+                        'brand' => $method->brand,
+                        'holder' => $method->holder_name,
+                    ],
+                    false,
+                );
+                $this->paymentMethods->setDefault($family, $method);
+
+                return [
+                    'checkout_url' => null,
+                    'payment_id' => $payment->id,
+                    'reference' => $reference,
+                    'payment' => $payment->fresh(['events']),
+                ];
+            }
+
+            if ($status === 'PENDING') {
+                $this->logEvent($payment, $user, 'payment_pending', 'Cobro pendiente con tarjeta guardada');
+
+                return [
+                    'checkout_url' => null,
+                    'payment_id' => $payment->id,
+                    'reference' => $reference,
+                    'payment' => $payment->fresh(['events']),
+                ];
+            }
+
+            $reason = (string) ($tx['status_message'] ?? 'Pago rechazado por Wompi');
+            $payment->update([
+                'status' => 'failed',
+                'failure_reason' => $reason,
+            ]);
+            $this->logEvent($payment, $user, 'payment_failed', $reason);
+
+            throw ValidationException::withMessages([
+                'payment_method_id' => $reason,
             ]);
         });
     }

@@ -76,6 +76,11 @@ class Family extends Model
         return $this->hasOne(Subscription::class)->latestOfMany();
     }
 
+    public function paymentMethods(): HasMany
+    {
+        return $this->hasMany(FamilyPaymentMethod::class);
+    }
+
     public function activePlanCode(): string
     {
         return $this->resolveActivePlanCode();

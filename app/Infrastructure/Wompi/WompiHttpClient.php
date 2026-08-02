@@ -110,15 +110,114 @@ class WompiHttpClient implements \App\Domains\Subscription\Contracts\PaymentGate
     }
 
     /**
+     * Tokens de aceptación del comercio (requeridos para payment sources).
+     *
+     * @return array{acceptance_token: string, accept_personal_auth: string}
+     */
+    public function merchantAcceptanceTokens(): array
+    {
+        $publicKey = (string) config('wompi.public_key');
+        if ($publicKey === '') {
+            throw new RuntimeException('Wompi no configurado (PUBLIC_KEY).');
+        }
+
+        $json = $this->requestPublic('GET', '/merchants/'.$publicKey);
+        $data = is_array($json['data'] ?? null) ? $json['data'] : $json;
+
+        $acceptance = (string) data_get($data, 'presigned_acceptance.acceptance_token', '');
+        $personal = (string) data_get($data, 'presigned_personal_data_auth.acceptance_token', '');
+
+        if ($acceptance === '') {
+            throw new RuntimeException('Wompi no devolvió acceptance_token.');
+        }
+
+        return [
+            'acceptance_token' => $acceptance,
+            'accept_personal_auth' => $personal !== '' ? $personal : $acceptance,
+        ];
+    }
+
+    /**
+     * Crea una fuente de pago reutilizable (CARD).
+     *
+     * @return array<string, mixed>
+     */
+    public function createPaymentSource(string $cardToken, string $customerEmail): array
+    {
+        $tokens = $this->merchantAcceptanceTokens();
+
+        $json = $this->request('POST', '/payment_sources', [
+            'type' => 'CARD',
+            'token' => $cardToken,
+            'customer_email' => $customerEmail,
+            'acceptance_token' => $tokens['acceptance_token'],
+            'accept_personal_auth' => $tokens['accept_personal_auth'],
+        ]);
+
+        $data = $json['data'] ?? $json;
+
+        return is_array($data) ? $data : [];
+    }
+
+    /**
+     * Cobro recurrente con payment_source_id (sin PAN/CVC).
+     *
+     * @return array<string, mixed>
+     */
+    public function chargePaymentSource(
+        int|string $paymentSourceId,
+        int $amountInCents,
+        string $currency,
+        string $reference,
+        string $customerEmail,
+        int $installments = 1,
+    ): array {
+        $json = $this->request('POST', '/transactions', [
+            'amount_in_cents' => $amountInCents,
+            'currency' => strtoupper($currency),
+            'customer_email' => $customerEmail,
+            'reference' => $reference,
+            'payment_source_id' => is_numeric($paymentSourceId) ? (int) $paymentSourceId : $paymentSourceId,
+            'payment_method' => [
+                'installments' => max(1, $installments),
+            ],
+            'recurrent' => true,
+        ]);
+
+        $data = $json['data'] ?? $json;
+
+        return is_array($data) ? $data : [];
+    }
+
+    /**
      * @param  array<string, mixed>|null  $body
      * @param  array<string, mixed>  $query
      * @return array<string, mixed>
      */
     private function request(string $method, string $path, ?array $body = null, array $query = []): array
     {
-        $token = (string) config('wompi.private_key');
+        return $this->send($method, $path, $body, $query, (string) config('wompi.private_key'));
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $body
+     * @param  array<string, mixed>  $query
+     * @return array<string, mixed>
+     */
+    private function requestPublic(string $method, string $path, ?array $body = null, array $query = []): array
+    {
+        return $this->send($method, $path, $body, $query, (string) config('wompi.public_key'));
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $body
+     * @param  array<string, mixed>  $query
+     * @return array<string, mixed>
+     */
+    private function send(string $method, string $path, ?array $body, array $query, string $token): array
+    {
         if ($token === '') {
-            throw new RuntimeException('Wompi no configurado (PRIVATE_KEY).');
+            throw new RuntimeException('Wompi no configurado (API key).');
         }
 
         $url = config('wompi.api_base').$path;

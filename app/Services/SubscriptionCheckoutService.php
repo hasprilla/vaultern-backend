@@ -21,6 +21,7 @@ class SubscriptionCheckoutService
 {
     public function __construct(
         private readonly SimulatedCardPaymentService $cardPayments,
+        private readonly FamilyPaymentMethodService $paymentMethods,
         private readonly FamilyNotificationService $notifications,
     ) {}
 
@@ -47,6 +48,9 @@ class SubscriptionCheckoutService
         $saveCard = array_key_exists('save_card', $input)
             ? (bool) $input['save_card']
             : true;
+        $paymentMethodId = isset($input['payment_method_id'])
+            ? (string) $input['payment_method_id']
+            : null;
         $reference = 'ZMF-'.strtoupper(Str::random(12));
 
         $plan = SubscriptionPlan::query()
@@ -62,7 +66,29 @@ class SubscriptionCheckoutService
                 : $plan->price_monthly_cents;
         }
 
-        return DB::transaction(function () use ($family, $user, $plan, $planCode, $billing, $isSimulated, $amountCents, $reference, $input, $saveCard) {
+        return DB::transaction(function () use (
+            $family,
+            $user,
+            $plan,
+            $planCode,
+            $billing,
+            $isSimulated,
+            $amountCents,
+            $reference,
+            $input,
+            $saveCard,
+            $paymentMethodId,
+        ) {
+            $savedMethod = null;
+            if ($paymentMethodId !== null && $paymentMethodId !== '') {
+                $savedMethod = $this->paymentMethods->findForFamily($family, $paymentMethodId);
+                if ($savedMethod === null || ! $savedMethod->isChargeable()) {
+                    throw ValidationException::withMessages([
+                        'payment_method_id' => 'La tarjeta seleccionada no está disponible.',
+                    ]);
+                }
+            }
+
             $payment = SubscriptionPayment::query()->create([
                 'id' => (string) Str::uuid(),
                 'family_id' => $family->id,
@@ -78,6 +104,7 @@ class SubscriptionCheckoutService
                 'metadata' => [
                     'mode' => $isSimulated ? 'simulated' : 'live',
                     'save_card' => $saveCard,
+                    'payment_method_id' => $savedMethod?->id,
                 ],
             ]);
 
@@ -87,6 +114,8 @@ class SubscriptionCheckoutService
                 'amount_cents' => $amountCents,
             ]);
 
+            $cardMeta = null;
+
             try {
                 if ($plan === null) {
                     throw ValidationException::withMessages([
@@ -94,26 +123,40 @@ class SubscriptionCheckoutService
                     ]);
                 }
 
-                $cardMeta = $this->cardPayments->validate([
-                    'card_number' => $input['card_number'] ?? '',
-                    'exp_month' => $input['exp_month'] ?? 0,
-                    'exp_year' => $input['exp_year'] ?? 0,
-                    'cvc' => $input['cvc'] ?? '',
-                    'cardholder_name' => $input['cardholder_name'] ?? '',
-                ]);
+                if ($savedMethod !== null) {
+                    $cardMeta = [
+                        'last4' => $savedMethod->last4,
+                        'brand' => $savedMethod->brand,
+                        'holder' => $savedMethod->holder_name,
+                    ];
+                    $payment->update([
+                        'card_brand' => $cardMeta['brand'],
+                        'card_last4' => $cardMeta['last4'],
+                        'card_holder_name' => $cardMeta['holder'],
+                    ]);
+                    $this->cardPayments->simulateCharge((string) $savedMethod->last4);
+                } else {
+                    $cardMeta = $this->cardPayments->validate([
+                        'card_number' => $input['card_number'] ?? '',
+                        'exp_month' => $input['exp_month'] ?? 0,
+                        'exp_year' => $input['exp_year'] ?? 0,
+                        'cvc' => $input['cvc'] ?? '',
+                        'cardholder_name' => $input['cardholder_name'] ?? '',
+                    ]);
 
-                $this->logEvent($payment, $user, 'card_validated', 'Tarjeta validada', [
-                    'card_brand' => $cardMeta['brand'],
-                    'card_last4' => $cardMeta['last4'],
-                ]);
+                    $this->logEvent($payment, $user, 'card_validated', 'Tarjeta validada', [
+                        'card_brand' => $cardMeta['brand'],
+                        'card_last4' => $cardMeta['last4'],
+                    ]);
 
-                $payment->update([
-                    'card_brand' => $cardMeta['brand'],
-                    'card_last4' => $cardMeta['last4'],
-                    'card_holder_name' => $cardMeta['holder'],
-                ]);
+                    $payment->update([
+                        'card_brand' => $cardMeta['brand'],
+                        'card_last4' => $cardMeta['last4'],
+                        'card_holder_name' => $cardMeta['holder'],
+                    ]);
 
-                $this->cardPayments->simulateCharge($cardMeta['last4']);
+                    $this->cardPayments->simulateCharge($cardMeta['last4']);
+                }
             } catch (ValidationException $e) {
                 $reason = collect($e->errors())->flatten()->first() ?? 'Pago rechazado';
                 $payment->update([
@@ -151,13 +194,13 @@ class SubscriptionCheckoutService
                 $plan,
                 $billing,
                 $isSimulated ? 'simulated' : 'manual',
-                [
-                    'last4' => $cardMeta['last4'],
-                    'brand' => $cardMeta['brand'],
-                    'holder' => $cardMeta['holder'],
-                ],
-                $saveCard,
+                $cardMeta,
+                $savedMethod !== null ? false : $saveCard,
             );
+
+            if ($savedMethod !== null) {
+                $this->paymentMethods->setDefault($family, $savedMethod);
+            }
 
             return [
                 'success' => true,
@@ -206,6 +249,8 @@ class SubscriptionCheckoutService
             'cancelled_at' => null,
         ];
 
+        $payload['renewal_grace_ends_at'] = null;
+
         if (
             $saveCard
             && is_array($cardMeta)
@@ -235,6 +280,25 @@ class SubscriptionCheckoutService
         }
 
         $payment->update($paymentUpdate);
+
+        if (
+            $saveCard
+            && is_array($cardMeta)
+            && filled($cardMeta['last4'] ?? null)
+        ) {
+            $family->setRelation('subscription', $subscription);
+            $this->paymentMethods->upsertFromCheckoutMeta(
+                $family,
+                $user,
+                [
+                    'last4' => substr((string) $cardMeta['last4'], -4),
+                    'brand' => $cardMeta['brand'] ?? null,
+                    'holder' => $cardMeta['holder'] ?? ($user->name),
+                ],
+                $provider === 'wompi' ? 'wompi' : 'simulated',
+                true,
+            );
+        }
 
         $family->update(['plan' => $plan->code]);
 

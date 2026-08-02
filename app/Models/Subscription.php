@@ -31,6 +31,7 @@ class Subscription extends Model
         'renewal_card_brand',
         'renewal_card_holder_name',
         'renewal_user_id',
+        'renewal_grace_ends_at',
     ];
 
     protected function casts(): array
@@ -38,11 +39,20 @@ class Subscription extends Model
         return [
             'current_period_end' => 'datetime',
             'cancelled_at' => 'datetime',
+            'renewal_grace_ends_at' => 'datetime',
         ];
     }
 
     public function hasPaidAccess(): bool
     {
+        if ($this->status === 'past_due') {
+            if ($this->renewal_grace_ends_at === null) {
+                return true;
+            }
+
+            return now()->lte($this->renewal_grace_ends_at);
+        }
+
         if (! in_array($this->status, ['active', 'cancelled'], true)) {
             return false;
         }
@@ -51,6 +61,8 @@ class Subscription extends Model
             return $this->status === 'active';
         }
 
+        // Durante gracia de renovación el acceso lo cubre past_due; active/cancelled
+        // solo mientras el periodo no haya vencido.
         return now()->toDateString() <= $this->current_period_end->toDateString();
     }
 
@@ -59,13 +71,34 @@ class Subscription extends Model
         return $this->status === 'cancelled' && $this->hasPaidAccess();
     }
 
+    public function isPastDue(): bool
+    {
+        return $this->status === 'past_due';
+    }
+
+    public function graceExpired(): bool
+    {
+        return $this->renewal_grace_ends_at !== null
+            && now()->gte($this->renewal_grace_ends_at);
+    }
+
     public function canAutoRenew(): bool
     {
-        if ($this->status !== 'active' || $this->cancelled_at !== null) {
+        if ($this->cancelled_at !== null) {
             return false;
         }
 
-        if ($this->renewal_card_last4 === null) {
+        if (! in_array($this->status, ['active', 'past_due'], true)) {
+            return false;
+        }
+
+        $hasMirrorCard = $this->renewal_card_last4 !== null;
+        $hasMethods = FamilyPaymentMethod::query()
+            ->where('family_id', $this->family_id)
+            ->where('status', 'active')
+            ->exists();
+
+        if (! $hasMirrorCard && ! $hasMethods) {
             return false;
         }
 
@@ -73,7 +106,7 @@ class Subscription extends Model
             ? $this->renewalUser
             : $this->renewalUser()->first();
 
-        if ($renewalUser === null || ! $renewalUser->isActive()) {
+        if ($renewalUser !== null && ! $renewalUser->isActive()) {
             return false;
         }
 
@@ -82,6 +115,10 @@ class Subscription extends Model
 
     public function freeFromDate(): ?\Illuminate\Support\Carbon
     {
+        if ($this->status === 'past_due' && $this->renewal_grace_ends_at !== null) {
+            return $this->renewal_grace_ends_at->copy();
+        }
+
         if ($this->current_period_end === null) {
             return null;
         }
@@ -91,6 +128,10 @@ class Subscription extends Model
 
     public function accessUntilDate(): ?string
     {
+        if ($this->status === 'past_due' && $this->renewal_grace_ends_at !== null) {
+            return $this->renewal_grace_ends_at->toDateString();
+        }
+
         if ($this->current_period_end === null) {
             return null;
         }
@@ -100,9 +141,33 @@ class Subscription extends Model
 
     public function isDueForRenewal(): bool
     {
-        return $this->canAutoRenew()
-            && $this->current_period_end !== null
-            && now()->toDateString() > $this->current_period_end->toDateString();
+        if ($this->cancelled_at !== null) {
+            return false;
+        }
+
+        if ($this->current_period_end === null) {
+            return false;
+        }
+
+        if (now()->toDateString() <= $this->current_period_end->toDateString()) {
+            return false;
+        }
+
+        if ($this->status === 'past_due') {
+            return ! $this->graceExpired();
+        }
+
+        return $this->status === 'active' && $this->canAutoRenew();
+    }
+
+    /** Clave de periodo a renovar (evita cobro doble del mismo periodo). */
+    public function renewalPeriodKey(): ?string
+    {
+        if ($this->current_period_end === null) {
+            return null;
+        }
+
+        return $this->id.'|'.$this->current_period_end->toDateString();
     }
 
     public function renewalUser(): BelongsTo

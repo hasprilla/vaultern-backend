@@ -45,7 +45,10 @@ return Application::configure(basePath: dirname(__DIR__))
         );
     })
     ->withSchedule(function (\Illuminate\Console\Scheduling\Schedule $schedule): void {
-        $schedule->command('subscriptions:renew')->dailyAt('02:00');
+        // Cada hora: reintentos multi-tarjeta durante gracia de 48h (sin solapar ejecuciones).
+        $schedule->command('subscriptions:renew')
+            ->hourly()
+            ->withoutOverlapping(55);
 
         // cPanel (QUEUE_CONNECTION=database): cron cada minuto drena jobs y sale.
         // Docker/Railway (redis): el servicio `worker` mantiene queue:work; no hace falta esto.
