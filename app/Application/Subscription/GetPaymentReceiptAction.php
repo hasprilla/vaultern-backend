@@ -8,12 +8,12 @@ use App\Models\Family;
 use App\Models\SubscriptionPayment;
 use App\Models\SubscriptionPlan;
 use App\Models\User;
-use Symfony\Component\HttpFoundation\Response;
+use Barryvdh\DomPDF\Facade\Pdf;
 
 final class GetPaymentReceiptAction
 {
     /**
-     * @return array{ok: true, html: string, filename: string}|array{ok: false, status: int, message: string}
+     * @return array{ok: true, pdf: string, filename: string}|array{ok: false, status: int, message: string}
      */
     public function execute(User $user, SubscriptionPayment $payment): array
     {
@@ -47,7 +47,7 @@ final class GetPaymentReceiptAction
             default => (string) ($payment->provider ?: '—'),
         };
 
-        $html = view('receipts.subscription_payment', [
+        $pdf = Pdf::loadView('receipts.subscription_payment', [
             'reference' => $payment->payment_reference,
             'amount' => $amount,
             'currency' => $currency,
@@ -61,14 +61,14 @@ final class GetPaymentReceiptAction
             'payerEmail' => $payment->user?->email ?? '—',
             'familyName' => $family?->name ?? '—',
             'issuedAt' => now()->timezone(config('app.timezone'))->format('d/m/Y H:i'),
-        ])->render();
+        ])->setPaper('letter');
 
         $safeRef = preg_replace('/[^A-Za-z0-9_-]/', '', (string) $payment->payment_reference) ?: $payment->id;
 
         return [
             'ok' => true,
-            'html' => $html,
-            'filename' => "comprobante-zumifly-{$safeRef}.html",
+            'pdf' => $pdf->output(),
+            'filename' => "comprobante-zumifly-{$safeRef}.pdf",
         ];
     }
 }

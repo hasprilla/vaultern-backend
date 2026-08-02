@@ -39,7 +39,7 @@ Producción: `pub_prod_` / `prv_prod_` + `WOMPI_SANDBOX=false`.
 | POST | `/api/v1/webhooks/wompi` | no |
 | GET | `/api/v1/subscriptions/wompi/pay/{payment}` | no |
 | GET | `/api/v1/subscriptions/wompi/return` | no |
-| GET | `/api/v1/subscriptions/payments/{id}/receipt` | sí (comprobante Zumifly HTML) |
+| GET | `/api/v1/subscriptions/payments/{id}/receipt` | sí (comprobante Zumifly PDF) |
 
 `POST /subscriptions/checkout` (tarjeta simulada) queda bloqueado si `WOMPI_ENABLED=true`.
 

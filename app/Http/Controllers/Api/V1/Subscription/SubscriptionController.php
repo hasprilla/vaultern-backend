@@ -410,8 +410,8 @@ HTML;
             return response()->json(['message' => $result['message']], $result['status']);
         }
 
-        return response($result['html'], 200, [
-            'Content-Type' => 'text/html; charset=UTF-8',
+        return response($result['pdf'], 200, [
+            'Content-Type' => 'application/pdf',
             'Content-Disposition' => 'attachment; filename="'.$result['filename'].'"',
         ]);
     }
