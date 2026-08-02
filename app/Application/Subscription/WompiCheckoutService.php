@@ -53,6 +53,7 @@ class WompiCheckoutService
         SubscriptionPlanCatalog::ensureSeeded();
 
         $billing = $billing === 'yearly' ? 'yearly' : 'monthly';
+        SubscriptionChangePolicy::assertCheckoutAllowed($family, $planCode);
         SubscriptionChangePolicy::assertBillingChangeAllowed($family, $billing);
 
         $plan = SubscriptionPlan::query()

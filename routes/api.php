@@ -136,6 +136,8 @@ Route::prefix('v1')->middleware(['api.auth', 'tenant'])->group(function () {
     Route::post('/subscriptions/checkout', [SubscriptionController::class, 'checkout']);
     Route::post('/subscriptions/checkout/wompi', [SubscriptionController::class, 'checkoutWompi']);
     Route::post('/subscriptions/payments/{payment}/wompi-sync', [SubscriptionController::class, 'syncWompiPayment']);
+    Route::post('/subscriptions/schedule-change', [SubscriptionController::class, 'scheduleChange']);
+    Route::delete('/subscriptions/schedule-change', [SubscriptionController::class, 'cancelScheduledChange']);
     Route::post('/subscriptions/cancel', [SubscriptionController::class, 'cancel']);
     Route::post('/subscriptions/resume', [SubscriptionController::class, 'resume']);
 

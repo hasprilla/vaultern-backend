@@ -9,6 +9,7 @@ use App\Models\Family;
 use App\Models\SubscriptionPayment;
 use App\Models\SubscriptionPlan;
 use App\Application\Subscription\Actions\DeleteSavedPaymentMethodAction;
+use App\Application\Subscription\Actions\SchedulePlanChangeAction;
 use App\Application\Subscription\GetPaymentReceiptAction;
 use App\Application\Subscription\StartWompiCheckoutAction;
 use App\Application\Subscription\SyncWompiPaymentAction;
@@ -39,6 +40,7 @@ class SubscriptionController extends Controller
         private readonly SyncWompiPaymentAction $syncWompiPaymentAction,
         private readonly GetPaymentReceiptAction $getPaymentReceiptAction,
         private readonly DeleteSavedPaymentMethodAction $deleteSavedPaymentMethod,
+        private readonly SchedulePlanChangeAction $schedulePlanChange,
         private readonly FamilyPaymentMethodService $paymentMethods,
         private readonly SubscriptionCancelService $cancelService,
         private readonly SubscriptionRenewalService $renewalService,
@@ -139,6 +141,11 @@ class SubscriptionController extends Controller
                 'auto_renew' => $subscription?->canAutoRenew() ?? false,
                 'past_due' => $subscription?->isPastDue() ?? false,
                 'renewal_grace_ends_at' => $subscription?->renewal_grace_ends_at?->toIso8601String(),
+                'pending_plan_code' => $subscription?->pending_plan_code,
+                'pending_billing' => $subscription?->pending_billing,
+                'pending_change_at' => $subscription?->pending_plan_code
+                    ? $subscription->accessUntilDate()
+                    : null,
                 'saved_payment_method' => $savedMethod,
                 'saved_payment_methods' => $methods,
                 'default_payment_method_id' => $defaultId,
@@ -499,6 +506,50 @@ HTML;
         return response($html, 200)->header('Content-Type', 'text/html; charset=UTF-8');
     }
 
+    public function scheduleChange(Request $request): JsonResponse
+    {
+        $family = $this->resolveFamily($request);
+        if ($family === null) {
+            return response()->json(['message' => 'Familia no encontrada'], 404);
+        }
+
+        $validated = $request->validate([
+            'plan_code' => ['required', 'string', 'max:40'],
+            'billing' => ['nullable', 'string', 'in:monthly,yearly'],
+        ]);
+
+        $result = $this->schedulePlanChange->execute(
+            $family,
+            $request->user(),
+            (string) $validated['plan_code'],
+            (string) ($validated['billing'] ?? 'monthly'),
+        );
+
+        return response()->json([
+            'message' => "Cambio a {$result['plan_name']} programado. "
+                .'Se cobrará y aplicará el '.($result['pending_change_at'] ?? 'vencimiento').'.',
+            'data' => $result,
+        ]);
+    }
+
+    public function cancelScheduledChange(Request $request): JsonResponse
+    {
+        $family = $this->resolveFamily($request);
+        if ($family === null) {
+            return response()->json(['message' => 'Familia no encontrada'], 404);
+        }
+
+        $result = $this->schedulePlanChange->cancel($family, $request->user());
+        if (($result['ok'] ?? false) !== true) {
+            return response()->json(['message' => 'No hay un cambio de plan programado.'], 404);
+        }
+
+        return response()->json([
+            'message' => 'Cambio de plan cancelado. Se renovará el plan actual.',
+            'data' => ['ok' => true],
+        ]);
+    }
+
     public function cancel(Request $request): JsonResponse
     {
         $family = $this->resolveFamily($request);
@@ -536,6 +587,22 @@ HTML;
         $family = $this->resolveFamily($request);
         if ($family === null) {
             return response()->json(['message' => 'Familia no encontrada'], 404);
+        }
+
+        // Pagos pending del mismo plan activo: cerrar como fallidos (evita fantasma al recomprar).
+        $activePlan = $family->subscription?->hasPaidAccess()
+            ? $family->subscription->plan_code
+            : null;
+        if ($activePlan !== null) {
+            SubscriptionPayment::query()
+                ->where('family_id', $family->id)
+                ->where('status', 'pending')
+                ->where('plan_code', $activePlan)
+                ->where('created_at', '<', now()->subMinutes(5))
+                ->update([
+                    'status' => 'failed',
+                    'failure_reason' => 'Plan ya activo; cobro omitido.',
+                ]);
         }
 
         $payments = SubscriptionPayment::query()

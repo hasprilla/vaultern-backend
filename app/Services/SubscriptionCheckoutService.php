@@ -43,6 +43,7 @@ class SubscriptionCheckoutService
 
         $planCode = (string) ($input['plan_code'] ?? '');
         $billing = ($input['billing'] ?? 'monthly') === 'yearly' ? 'yearly' : 'monthly';
+        SubscriptionChangePolicy::assertCheckoutAllowed($family, $planCode);
         SubscriptionChangePolicy::assertBillingChangeAllowed($family, $billing);
         $isSimulated = (bool) ($input['simulated'] ?? true);
         $saveCard = array_key_exists('save_card', $input)
@@ -250,6 +251,8 @@ class SubscriptionCheckoutService
         ];
 
         $payload['renewal_grace_ends_at'] = null;
+        $payload['pending_plan_code'] = null;
+        $payload['pending_billing'] = null;
 
         if (
             $saveCard

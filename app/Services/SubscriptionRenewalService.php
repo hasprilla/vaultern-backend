@@ -187,8 +187,16 @@ class SubscriptionRenewalService
                 return false;
             }
 
+            // Cambio programado: cobrar el plan pendiente al vencer (no el actual).
+            $renewPlanCode = filled($locked->pending_plan_code)
+                ? (string) $locked->pending_plan_code
+                : (string) $locked->plan_code;
+            $billing = filled($locked->pending_billing)
+                ? (($locked->pending_billing === 'yearly') ? 'yearly' : 'monthly')
+                : (($locked->billing ?? 'monthly') === 'yearly' ? 'yearly' : 'monthly');
+
             $plan = SubscriptionPlan::query()
-                ->where('code', $locked->plan_code)
+                ->where('code', $renewPlanCode)
                 ->where('is_active', true)
                 ->first();
 
@@ -198,7 +206,6 @@ class SubscriptionRenewalService
                 return false;
             }
 
-            $billing = $locked->billing ?? 'monthly';
             $amountCents = $billing === 'yearly'
                 ? ($plan->price_yearly_cents ?? $plan->price_monthly_cents * 12)
                 : $plan->price_monthly_cents;
@@ -307,9 +314,13 @@ class SubscriptionRenewalService
 
                     $locked->update([
                         'status' => 'active',
+                        'plan_code' => $plan->code,
+                        'billing' => $billing,
                         'current_period_end' => $newPeriodEnd,
                         'cancelled_at' => null,
                         'renewal_grace_ends_at' => null,
+                        'pending_plan_code' => null,
+                        'pending_billing' => null,
                         'renewal_card_last4' => $method->last4,
                         'renewal_card_brand' => $method->brand,
                         'renewal_card_holder_name' => $method->holder_name,
@@ -328,7 +339,12 @@ class SubscriptionRenewalService
                         'subscription_renewed',
                         'Suscripción renovada',
                         "El plan {$plan->name} se renovó automáticamente (ref. {$reference}). Próximo vencimiento: {$newPeriodEnd->toDateString()}.",
-                        ['entity_type' => 'subscription', 'entity_id' => $locked->id],
+                        [
+                            'entity_type' => 'subscription',
+                            'entity_id' => $locked->id,
+                            'plan_code' => $plan->code,
+                            'billing' => $billing,
+                        ],
                     );
 
                     return true;

@@ -32,6 +32,8 @@ class Subscription extends Model
         'renewal_card_holder_name',
         'renewal_user_id',
         'renewal_grace_ends_at',
+        'pending_plan_code',
+        'pending_billing',
     ];
 
     protected function casts(): array

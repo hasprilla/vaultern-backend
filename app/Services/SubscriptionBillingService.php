@@ -59,6 +59,8 @@ class SubscriptionBillingService
             'renewal_card_brand'       => null,
             'renewal_card_holder_name' => null,
             'renewal_user_id'          => null,
+            'pending_plan_code'        => null,
+            'pending_billing'          => null,
         ]);
 
         $subscription->refresh();
