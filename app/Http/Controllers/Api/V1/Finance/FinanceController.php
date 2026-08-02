@@ -249,7 +249,7 @@ class FinanceController extends Controller
             return $forbidden;
         }
 
-        return BudgetResource::collection(Budget::query()->get());
+        return BudgetResource::collection(Budget::query()->get())->response();
     }
 
     public function budgetsStore(Request $request): JsonResponse
