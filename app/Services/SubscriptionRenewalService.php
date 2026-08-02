@@ -112,6 +112,11 @@ class SubscriptionRenewalService
                 return null;
             }
 
+            // Cancelación programada / paso a Free: nunca cobrar de nuevo.
+            if ($locked->cancelled_at !== null) {
+                return null;
+            }
+
             // Anti pago doble: si ya se renovó este periodo, salir.
             if ($locked->current_period_end !== null
                 && now()->toDateString() <= $locked->current_period_end->toDateString()
@@ -508,6 +513,14 @@ class SubscriptionRenewalService
             'renewal_grace_ends_at' => null,
         ]);
         $subscription->family?->update(['plan' => $subscription->plan_code]);
+    }
+
+    /**
+     * Pasa la suscripción a Free sin intentar cobro (periodo consumido o salida voluntaria en past_due).
+     */
+    public function expireToFree(Subscription $subscription, string $reason): void
+    {
+        $this->expireSubscription($subscription, $reason, null, null, 'grace_expired');
     }
 
     private function expireSubscription(

@@ -559,10 +559,14 @@ HTML;
 
         $result = $this->cancelService->cancel($family, $request->user());
 
+        $message = ! empty($result['moved_to_free'])
+            ? 'Pasaste al plan Free. No se realizarán más cobros automáticos.'
+            : 'Paso a Free programado. Mantendrás tu plan hasta el '
+                .($result['access_until'] ?? 'fin del periodo')
+                .'. No se realizarán más cobros automáticos. El plan gratuito inicia al día siguiente.';
+
         return response()->json([
-            'message' => 'Cancelación programada. Mantendrás tu plan hasta el '
-                .$result['access_until']
-                .'. El plan gratuito inicia al día siguiente.',
+            'message' => $message,
             'data'    => $result,
         ]);
     }

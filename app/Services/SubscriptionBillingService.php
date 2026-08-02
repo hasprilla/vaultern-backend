@@ -61,6 +61,7 @@ class SubscriptionBillingService
             'renewal_user_id'          => null,
             'pending_plan_code'        => null,
             'pending_billing'          => null,
+            'renewal_grace_ends_at'    => null,
         ]);
 
         $subscription->refresh();
