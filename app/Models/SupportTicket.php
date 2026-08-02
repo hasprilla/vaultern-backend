@@ -25,6 +25,8 @@ class SupportTicket extends Model
         'category',
         'status',
         'priority',
+        'entity_type',
+        'entity_id',
         'last_message_at',
     ];
 

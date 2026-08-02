@@ -58,6 +58,8 @@ class SupportController extends Controller
             'category' => ['nullable', 'string', Rule::in(['general', 'account', 'tasks', 'finance', 'technical'])],
             'body' => ['required', 'string', 'max:5000'],
             'priority' => ['nullable', 'string', Rule::in(['low', 'normal', 'high'])],
+            'entity_type' => ['nullable', 'string', Rule::in(['subscription_payment'])],
+            'entity_id' => ['nullable', 'string', 'max:64', 'required_with:entity_type'],
         ]);
 
         $result = $this->createTicket->execute($request->user(), $validated);

@@ -126,6 +126,7 @@ Route::prefix('v1')->middleware(['api.auth', 'tenant'])->group(function () {
     Route::get('/subscriptions/current', [SubscriptionController::class, 'current']);
     Route::get('/subscriptions/payments', [SubscriptionController::class, 'payments']);
     Route::get('/subscriptions/payments/{payment}', [SubscriptionController::class, 'showPayment']);
+    Route::get('/subscriptions/payments/{payment}/receipt', [SubscriptionController::class, 'paymentReceipt']);
     Route::post('/subscriptions/checkout', [SubscriptionController::class, 'checkout']);
     Route::post('/subscriptions/checkout/wompi', [SubscriptionController::class, 'checkoutWompi']);
     Route::post('/subscriptions/payments/{payment}/wompi-sync', [SubscriptionController::class, 'syncWompiPayment']);

@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Family;
 use App\Models\SubscriptionPayment;
 use App\Models\SubscriptionPlan;
+use App\Application\Subscription\GetPaymentReceiptAction;
 use App\Application\Subscription\StartWompiCheckoutAction;
 use App\Application\Subscription\SyncWompiPaymentAction;
 use App\Application\Subscription\WompiCheckoutService;
@@ -32,6 +33,7 @@ class SubscriptionController extends Controller
         private readonly WompiCheckoutService $wompiCheckoutService,
         private readonly StartWompiCheckoutAction $startWompiCheckoutAction,
         private readonly SyncWompiPaymentAction $syncWompiPaymentAction,
+        private readonly GetPaymentReceiptAction $getPaymentReceiptAction,
         private readonly SubscriptionCancelService $cancelService,
         private readonly SubscriptionRenewalService $renewalService,
         private readonly SubscriptionBillingService $billingService,
@@ -398,6 +400,20 @@ HTML;
         $payment->load(['events' => fn ($q) => $q->orderBy('created_at'), 'subscription']);
 
         return response()->json(['data' => $payment]);
+    }
+
+    public function paymentReceipt(Request $request, SubscriptionPayment $payment): Response|JsonResponse
+    {
+        $result = $this->getPaymentReceiptAction->execute($request->user(), $payment);
+
+        if (($result['ok'] ?? false) !== true) {
+            return response()->json(['message' => $result['message']], $result['status']);
+        }
+
+        return response($result['html'], 200, [
+            'Content-Type' => 'text/html; charset=UTF-8',
+            'Content-Disposition' => 'attachment; filename="'.$result['filename'].'"',
+        ]);
     }
 
     private function simpleHtml(string $title, string $hint): string
