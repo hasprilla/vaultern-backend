@@ -22,11 +22,11 @@ class SubscriptionRenewalService
     ) {}
 
     /**
-     * @return array{processed: int, renewed: int, failed: int}
+     * @return array{processed: int, renewed: int, failed: int, expired: int}
      */
     public function renewDueSubscriptions(): array
     {
-        $stats = ['processed' => 0, 'renewed' => 0, 'failed' => 0];
+        $stats = ['processed' => 0, 'renewed' => 0, 'failed' => 0, 'expired' => 0];
 
         Subscription::query()
             ->where('status', 'active')
@@ -45,6 +45,29 @@ class SubscriptionRenewalService
                     } elseif ($result === false) {
                         $stats['failed']++;
                     }
+                }
+            });
+
+        // Wompi / sin tarjeta / canceladas al vencer: expirar y avisar a toda la familia.
+        Subscription::query()
+            ->whereIn('status', ['active', 'cancelled'])
+            ->whereNotNull('current_period_end')
+            ->whereDate('current_period_end', '<', now()->toDateString())
+            ->with(['family', 'renewalUser'])
+            ->orderBy('current_period_end')
+            ->chunkById(50, function ($subscriptions) use (&$stats) {
+                foreach ($subscriptions as $subscription) {
+                    if ($subscription->isDueForRenewal()) {
+                        continue;
+                    }
+
+                    $stats['processed']++;
+                    $this->expireSubscription(
+                        $subscription,
+                        'El periodo de suscripción venció.',
+                        $subscription->renewalUser,
+                    );
+                    $stats['expired']++;
                 }
             });
 
@@ -162,11 +185,12 @@ class SubscriptionRenewalService
 
                 $family->update(['plan' => $plan->code]);
 
-                $this->notifications->notifyFamily(
-                    $user,
+                $this->notifications->notifyFamilyById(
+                    (string) $family->id,
+                    null,
                     'subscription_renewed',
                     'Suscripción renovada',
-                    "Tu plan {$plan->name} se renovó automáticamente (ref. {$reference}). Próximo vencimiento: {$newPeriodEnd->toDateString()}.",
+                    "El plan {$plan->name} se renovó automáticamente (ref. {$reference}). Próximo vencimiento: {$newPeriodEnd->toDateString()}.",
                     ['entity_type' => 'subscription', 'entity_id' => $subscription->id],
                 );
 
@@ -222,18 +246,28 @@ class SubscriptionRenewalService
         ?User $user = null,
         ?string $reference = null,
     ): void {
+        $subscription->loadMissing('family');
         $subscription->update(['status' => 'expired']);
         $subscription->family?->reconcileSubscriptionPlan();
 
-        if ($user !== null) {
-            $this->notifications->notifyFamily(
-                $user,
-                'subscription_renewal_failed',
-                'Renovación fallida',
-                "{$reason}".($reference ? " (ref. {$reference})" : '').' Tu suscripción ha finalizado.',
-                ['entity_type' => 'subscription', 'entity_id' => $subscription->id],
-            );
+        $family = $subscription->family;
+        if ($family === null) {
+            return;
         }
+
+        $suffix = $reference ? " (ref. {$reference})" : '';
+        $this->notifications->notifyFamilyById(
+            (string) $family->id,
+            null,
+            'subscription_expired',
+            'Suscripción vencida',
+            "El plan {$subscription->plan_code} venció. {$reason}{$suffix}",
+            [
+                'entity_type' => 'subscription',
+                'entity_id' => $subscription->id,
+                'plan_code' => $subscription->plan_code,
+            ],
+        );
     }
 
     private function logEvent(

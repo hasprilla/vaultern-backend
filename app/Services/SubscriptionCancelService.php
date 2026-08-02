@@ -49,8 +49,9 @@ class SubscriptionCancelService
                 "Cancelación programada del plan {$previousPlan}. Acceso hasta ".SubscriptionPeriod::accessUntilDate($periodEnd),
             );
 
-            $this->notifications->notifyFamily(
-                $user,
+            $this->notifications->notifyFamilyById(
+                (string) $family->id,
+                null,
                 'subscription_cancel',
                 'Cancelación programada',
                 "{$user->name} programó la cancelación del plan {$previousPlan}. Acceso hasta ".SubscriptionPeriod::accessUntilDate($periodEnd).'.',

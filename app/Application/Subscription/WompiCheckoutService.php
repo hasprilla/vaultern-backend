@@ -12,6 +12,7 @@ use App\Models\SubscriptionPlan;
 use App\Models\User;
 use App\Services\FamilyNotificationService;
 use App\Services\SubscriptionCheckoutService;
+use App\Support\SubscriptionChangePolicy;
 use App\Support\SubscriptionPlanCatalog;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -41,6 +42,7 @@ class WompiCheckoutService
         SubscriptionPlanCatalog::ensureSeeded();
 
         $billing = $billing === 'yearly' ? 'yearly' : 'monthly';
+        SubscriptionChangePolicy::assertBillingChangeAllowed($family, $billing);
 
         $plan = SubscriptionPlan::query()
             ->where('code', $planCode)

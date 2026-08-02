@@ -127,8 +127,9 @@ class SubscriptionBillingService
         $subscription->refresh();
         $family->reconcileSubscriptionPlan();
 
-        $this->notifications->notifyFamily(
-            $user,
+        $this->notifications->notifyFamilyById(
+            (string) $family->id,
+            null,
             'subscription_resumed',
             'Suscripción reactivada',
             "{$user->name} revirtió la cancelación del plan {$subscription->plan_code}. La suscripción continúa activa.",

@@ -18,10 +18,11 @@ class RenewSubscriptionsCommand extends Command
         $stats = $renewals->renewDueSubscriptions();
 
         $this->info(sprintf(
-            'Renovaciones: %d procesadas, %d exitosas, %d fallidas.',
+            'Suscripciones: %d procesadas, %d renovadas, %d fallidas, %d vencidas.',
             $stats['processed'],
             $stats['renewed'],
             $stats['failed'],
+            $stats['expired'] ?? 0,
         ));
 
         return self::SUCCESS;

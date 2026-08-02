@@ -10,6 +10,7 @@ use App\Models\SubscriptionPayment;
 use App\Models\SubscriptionPaymentEvent;
 use App\Models\SubscriptionPlan;
 use App\Models\User;
+use App\Support\SubscriptionChangePolicy;
 use App\Support\SubscriptionPeriod;
 use App\Support\SubscriptionPlanCatalog;
 use Illuminate\Support\Facades\DB;
@@ -41,6 +42,7 @@ class SubscriptionCheckoutService
 
         $planCode = (string) ($input['plan_code'] ?? '');
         $billing = ($input['billing'] ?? 'monthly') === 'yearly' ? 'yearly' : 'monthly';
+        SubscriptionChangePolicy::assertBillingChangeAllowed($family, $billing);
         $isSimulated = (bool) ($input['simulated'] ?? true);
         $reference = 'ZMF-'.strtoupper(Str::random(12));
 
@@ -218,12 +220,21 @@ class SubscriptionCheckoutService
             'current_period_end' => $periodEnd->toIso8601String(),
         ]);
 
-        $this->notifications->notifyFamily(
-            $user,
+        $billingLabel = $billing === 'yearly' ? 'anual' : 'mensual';
+        $until = $subscription->accessUntilDate() ?? '—';
+        $this->notifications->notifyFamilyById(
+            (string) $family->id,
+            null,
             'subscription_checkout',
-            'Plan activado',
-            "{$user->name} activó el plan {$plan->code}",
-            ['entity_type' => 'subscription', 'entity_id' => $subscription->id],
+            'Suscripción actualizada',
+            "{$user->name} activó el plan {$plan->name} ({$billingLabel}). Acceso hasta {$until}.",
+            [
+                'entity_type' => 'subscription',
+                'entity_id' => $subscription->id,
+                'plan_code' => $plan->code,
+                'billing' => $billing,
+                'current_period_end' => $until,
+            ],
         );
 
         return $subscription;
