@@ -52,6 +52,11 @@ Route::prefix('v1/auth')->group(function () {
     Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 });
 
+// Adjuntos: solo auth + tenant (nunca device.recovery) para que el visor no falle.
+Route::prefix('v1')->middleware(['api.auth', 'tenant'])->group(function () {
+    Route::get('/attachments/{attachment}/file', [AttachmentFileController::class, 'show']);
+});
+
 Route::prefix('v1')->middleware(['api.auth', 'device.recovery', 'tenant'])->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::get('/auth/me', [AuthController::class, 'me']);
@@ -87,8 +92,6 @@ Route::prefix('v1')->middleware(['api.auth', 'device.recovery', 'tenant'])->grou
     Route::get('/families/{family}/messages', [ParentMessageController::class, 'index']);
     Route::post('/families/{family}/messages', [ParentMessageController::class, 'store']);
     Route::patch('/families/{family}/messages/{message}/read', [ParentMessageController::class, 'markRead']);
-
-    Route::get('/attachments/{attachment}/file', [AttachmentFileController::class, 'show']);
 
     Route::apiResource('tasks', TaskController::class);
     Route::patch('/tasks/{task}/complete', [TaskController::class, 'complete']);

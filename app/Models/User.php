@@ -62,6 +62,11 @@ class User extends Authenticatable
 
     public function hasDeviceRecoveryConfigured(): bool
     {
+        // Sin migración aún en cPanel: no forzar ni desafiar.
+        if (! SchemaCompat::hasColumn('users', 'device_secret_hash')) {
+            return false;
+        }
+
         return is_string($this->device_secret_hash)
             && $this->device_secret_hash !== ''
             && is_string($this->security_question_key)
@@ -72,11 +77,19 @@ class User extends Authenticatable
 
     public function mustSetupDeviceRecovery(): bool
     {
+        if (! SchemaCompat::hasColumn('users', 'device_secret_hash')) {
+            return false;
+        }
+
         return ! $this->hasDeviceRecoveryConfigured();
     }
 
     public function mustRotateDeviceSecret(): bool
     {
+        if (! SchemaCompat::hasColumn('users', 'device_secret_must_rotate')) {
+            return false;
+        }
+
         return (bool) $this->device_secret_must_rotate;
     }
 

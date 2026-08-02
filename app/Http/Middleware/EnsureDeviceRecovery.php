@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Middleware;
 
+use App\Support\SchemaCompat;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -24,6 +25,11 @@ class EnsureDeviceRecovery
 
     public function handle(Request $request, Closure $next): Response
     {
+        // Compat cPanel: sin columnas, no bloquear la API.
+        if (! SchemaCompat::hasColumn('users', 'device_secret_hash')) {
+            return $next($request);
+        }
+
         $user = $request->user();
         if ($user === null || $user->bypassesFamilyTenant()) {
             return $next($request);
@@ -31,6 +37,11 @@ class EnsureDeviceRecovery
 
         $path = trim($request->path(), '/');
         if (in_array($path, self::ALLOWED, true)) {
+            return $next($request);
+        }
+
+        // Adjuntos: nunca bloquear por recovery (visor de imágenes/PDF).
+        if (str_starts_with($path, 'api/v1/attachments/') && str_ends_with($path, '/file')) {
             return $next($request);
         }
 
