@@ -25,19 +25,8 @@ final class FamilyOwnership
             return true;
         }
 
-        if ($family->owner_user_id !== null
-            && (int) $family->owner_user_id === (int) $actor->id) {
-            return true;
-        }
-
-        if ($family->owner_user_id !== null) {
-            $ownerEmail = User::query()->where('id', $family->owner_user_id)->value('email');
-            if (is_string($ownerEmail)
-                && strcasecmp(trim($ownerEmail), trim((string) $actor->email)) === 0) {
-                return true;
-            }
-        }
-
-        return false;
+        // Solo owner_user_id (o isFamilyOwner). Sin match por email: evita falsos dueños.
+        return $family->owner_user_id !== null
+            && (int) $family->owner_user_id === (int) $actor->id;
     }
 }

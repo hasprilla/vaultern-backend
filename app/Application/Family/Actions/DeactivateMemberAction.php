@@ -13,6 +13,10 @@ use App\Support\FamilyOwnership;
 use Illuminate\Support\Facades\DB;
 
 /**
+ * Desactiva la membresía de un usuario en UN núcleo familiar.
+ * No desactiva la cuenta ni bloquea el login global: el miembro puede seguir
+ * en otras familias. Solo account_status=deactivated/deleted bloquea sesión.
+ *
  * @phpstan-type DeactivateSuccess array{ok: true, member_id: string}
  * @phpstan-type DeactivateFailure array{ok: false, status: int, message: string}
  */
@@ -70,22 +74,40 @@ final class DeactivateMemberAction
             return [
                 'ok' => false,
                 'status' => 422,
-                'message' => 'Este miembro ya está desactivado.',
+                'message' => 'Este miembro ya está desactivado en este núcleo.',
             ];
         }
 
         $memberUser = User::query()->findOrFail($memberId);
+        $wasCurrentFamily = (string) $memberUser->family_id === (string) $family->id;
 
-        DB::transaction(function () use ($membership, $memberUser) {
+        DB::transaction(function () use ($membership, $memberUser, $wasCurrentFamily, $family) {
+            // Solo esta fila de family_members. Nunca account_status.
             $membership->update(['status' => 'inactive']);
-            $this->tokens->revoke($memberUser);
+            $memberUser->clearFamilyMembershipCache();
+
+            if ($wasCurrentFamily) {
+                // Si tiene otro núcleo activo, cambia el contexto; si no, deja family_id
+                // apuntando a este (inactivo) para que el tenant lo rechace solo aquí.
+                $switched = $memberUser->ensureActiveFamilyContext();
+                if (! $switched && (string) $memberUser->family_id === (string) $family->id) {
+                    // Sin otros núcleos: conserva family_id (historial) pero sin membresía activa.
+                    $memberUser->clearFamilyMembershipCache();
+                }
+            }
+
+            // Cierra sesión solo si este era su núcleo actual (fuerza re-login con nuevo contexto).
+            // No afecta account_status ni otras membresías.
+            if ($wasCurrentFamily) {
+                $this->tokens->revoke($memberUser);
+            }
         });
 
         $this->notifications->notifyFamily(
             $actor,
             'family_updated',
-            'Acceso desactivado',
-            "{$actor->name} desactivó el acceso de {$memberUser->name} al núcleo familiar",
+            'Acceso desactivado en este núcleo',
+            "{$actor->name} desactivó el acceso de {$memberUser->name} solo en este núcleo familiar. Su cuenta y otras familias no se ven afectadas.",
             ['entity_type' => 'user', 'entity_id' => (string) $memberId],
         );
 

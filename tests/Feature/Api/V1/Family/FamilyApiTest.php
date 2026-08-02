@@ -215,17 +215,30 @@ class FamilyApiTest extends TestCase
             'account_status' => 'active',
         ]);
 
-        // Tokens revocados: no puede seguir usando la sesión.
+        // Tokens revocados solo porque este era su núcleo actual.
         $this->getJson('/api/v1/families', $this->authHeaders($partnerTokens))
             ->assertUnauthorized();
 
-        // Login bloqueado mientras la membresía esté inactiva.
-        $this->postJson('/api/v1/auth/login', [
+        // La cuenta sigue activa: puede iniciar sesión (desactivar núcleo ≠ desactivar cuenta).
+        // Sin otro núcleo activo, el tenant de familia responde membership inactive.
+        $login = $this->postJson('/api/v1/auth/login', [
             'email' => 'madre.desactivar@yopmail.com',
             'password' => 'password',
-        ])
+        ])->assertOk();
+
+        $newToken = $login->json('data.access_token');
+        $this->assertNotEmpty($newToken);
+
+        $this->getJson('/api/v1/families', $this->authHeaders([
+            'access_token' => $newToken,
+        ]))
             ->assertForbidden()
             ->assertJsonPath('code', 'family_membership_inactive');
+
+        $this->assertDatabaseHas('users', [
+            'id' => $partner->id,
+            'account_status' => 'active',
+        ]);
 
         // El dueño sigue viendo al miembro inactivo.
         $this->getJson('/api/v1/families', $this->authHeaders($ownerTokens))
@@ -327,11 +340,68 @@ class FamilyApiTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.membership_status', 'inactive');
 
+        // Tutor desactivado en este núcleo: cuenta activa, login permitido.
         $this->postJson('/api/v1/auth/login', [
             'email' => 'tutor.desactivar@yopmail.com',
             'password' => 'password',
-        ])
-            ->assertForbidden()
-            ->assertJsonPath('code', 'family_membership_inactive');
+        ])->assertOk();
+    }
+
+    public function test_deactivate_in_one_family_keeps_other_family_access(): void
+    {
+        ['user' => $ownerA, 'family' => $familyA, 'tokens' => $ownerATokens] = $this->createUserWithFamily();
+        ['user' => $ownerB, 'family' => $familyB] = $this->createUserWithFamily([
+            'email' => 'owner.b@yopmail.com',
+        ]);
+
+        $shared = User::factory()->create([
+            'family_id' => $familyA->id,
+            'role' => 'madre',
+            'email' => 'madre.multi@yopmail.com',
+            'account_status' => 'active',
+        ]);
+
+        FamilyMember::query()->create([
+            'id' => (string) Str::uuid(),
+            'family_id' => $familyA->id,
+            'user_id' => $shared->id,
+            'role' => 'madre',
+            'status' => 'active',
+        ]);
+        FamilyMember::query()->create([
+            'id' => (string) Str::uuid(),
+            'family_id' => $familyB->id,
+            'user_id' => $shared->id,
+            'role' => 'tutor',
+            'status' => 'active',
+        ]);
+
+        $this->postJson(
+            "/api/v1/families/{$familyA->id}/members/{$shared->id}/deactivate",
+            [],
+            $this->authHeaders($ownerATokens),
+        )->assertOk();
+
+        $this->assertDatabaseHas('family_members', [
+            'user_id' => $shared->id,
+            'family_id' => $familyA->id,
+            'status' => 'inactive',
+        ]);
+        $this->assertDatabaseHas('family_members', [
+            'user_id' => $shared->id,
+            'family_id' => $familyB->id,
+            'status' => 'active',
+        ]);
+        $this->assertDatabaseHas('users', [
+            'id' => $shared->id,
+            'account_status' => 'active',
+            'family_id' => $familyB->id,
+            'role' => 'tutor',
+        ]);
+
+        $this->postJson('/api/v1/auth/login', [
+            'email' => 'madre.multi@yopmail.com',
+            'password' => 'password',
+        ])->assertOk();
     }
 }

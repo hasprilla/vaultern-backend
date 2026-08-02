@@ -15,6 +15,7 @@ use App\Application\Family\Actions\RejectJoinRequestAction;
 use App\Application\Family\Actions\SyncChildGuardiansAction;
 use App\Application\Family\Actions\SyncParentChildAccessAction;
 use App\Application\Family\Actions\UpdateFamilyAction;
+use App\Application\Family\Actions\UpdateMemberAccessAction;
 use App\Application\Family\Queries\GetFamilyDetailsQuery;
 use App\Application\Family\Queries\ListPendingJoinRequestsQuery;
 use App\Http\Controllers\Controller;
@@ -42,6 +43,7 @@ class FamilyController extends Controller
         private readonly AssignMemberRoleAction $assignMemberRole,
         private readonly SyncChildGuardiansAction $syncChildGuardiansAction,
         private readonly SyncParentChildAccessAction $syncParentChildAccessAction,
+        private readonly UpdateMemberAccessAction $updateMemberAccessAction,
         private readonly DeactivateMemberAction $deactivateMemberAction,
         private readonly ReactivateMemberAction $reactivateMemberAction,
     ) {}
@@ -296,6 +298,42 @@ class FamilyController extends Controller
         ]);
     }
 
+    /** Dueño: rol + módulos (tareas/finanzas) + hijos visibles en una sola llamada. */
+    public function updateMemberAccess(Request $request, string $family, string $member): JsonResponse
+    {
+        $this->assertFamilyAccess($request, $family);
+
+        $validated = $request->validate([
+            'role' => ['sometimes', 'in:padre,madre,tutor,hijo'],
+            'can_tasks' => ['sometimes', 'boolean'],
+            'can_finances' => ['sometimes', 'boolean'],
+            'child_ids' => ['sometimes', 'array'],
+            'child_ids.*' => ['integer', 'exists:users,id'],
+        ]);
+
+        $familyModel = Family::query()->findOrFail($family);
+        $result = $this->updateMemberAccessAction->execute(
+            $request->user(),
+            $familyModel,
+            $member,
+            $validated,
+        );
+
+        if (($result['ok'] ?? false) !== true) {
+            return response()->json(['message' => $result['message']], $result['status']);
+        }
+
+        return response()->json([
+            'message' => 'Acceso y módulos actualizados',
+            'data' => [
+                'member_id' => $result['member_id'],
+                'role' => $result['role'],
+                'can_tasks' => $result['can_tasks'],
+                'can_finances' => $result['can_finances'],
+            ],
+        ]);
+    }
+
     /**
      * El dueño desactiva a un padre/madre sin borrar datos.
      * Queda sin poder realizar acciones del núcleo familiar hasta reactivación.
@@ -312,7 +350,7 @@ class FamilyController extends Controller
         }
 
         return response()->json([
-            'message' => 'Acceso desactivado. La información se conserva y puedes reactivarlo cuando quieras.',
+            'message' => 'Acceso desactivado solo en este núcleo. La cuenta sigue activa y otras familias no se ven afectadas.',
             'data' => [
                 'member_id' => $result['member_id'],
                 'membership_status' => 'inactive',
@@ -332,7 +370,7 @@ class FamilyController extends Controller
         }
 
         return response()->json([
-            'message' => 'Acceso reactivado. La persona ya puede volver a iniciar sesión.',
+            'message' => 'Acceso reactivado en este núcleo familiar.',
             'data' => [
                 'member_id' => $result['member_id'],
                 'membership_status' => 'active',

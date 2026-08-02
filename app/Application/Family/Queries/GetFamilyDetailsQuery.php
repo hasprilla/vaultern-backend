@@ -107,6 +107,18 @@ final class GetFamilyDetailsQuery
                 $payload = (new UserResource($m->user))->resolve();
                 $payload['membership_status'] = $m->status;
 
+                $role = (string) ($m->role ?? $m->user?->role ?? '');
+                $defaultTasks = in_array($role, ['padre', 'madre', 'tutor'], true);
+                $defaultFinances = in_array($role, ['padre', 'madre'], true);
+
+                if (SchemaCompat::hasColumn('family_members', 'can_tasks')) {
+                    $payload['can_tasks'] = $m->can_tasks ?? $defaultTasks;
+                    $payload['can_finances'] = $m->can_finances ?? $defaultFinances;
+                } else {
+                    $payload['can_tasks'] = $defaultTasks;
+                    $payload['can_finances'] = $defaultFinances;
+                }
+
                 return $payload;
             })->all(),
             'my_child_ids' => array_map('strval', $myChildIds),

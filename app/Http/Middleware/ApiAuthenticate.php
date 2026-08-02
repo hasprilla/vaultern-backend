@@ -33,12 +33,10 @@ class ApiAuthenticate
             ], 403);
         }
 
-        if (! $user->hasActiveFamilyMembership()) {
-            return response()->json([
-                'message' => 'Tu acceso a este núcleo familiar fue desactivado por el dueño de la membresía.',
-                'code'    => 'family_membership_inactive',
-            ], 403);
-        }
+        // Membresía inactiva en un núcleo no invalida la sesión global:
+        // el TenantMiddleware bloquea solo rutas de ese núcleo; aquí intentamos
+        // cambiar a otro núcleo activo si existe.
+        $user->ensureActiveFamilyContext();
 
         Auth::setUser($user);
 

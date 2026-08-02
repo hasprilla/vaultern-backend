@@ -169,6 +169,72 @@ class User extends Authenticatable
             ->exists();
     }
 
+    /** True si tiene al menos una membresía activa en cualquier núcleo. */
+    public function hasAnyActiveFamilyMembership(): bool
+    {
+        if ($this->bypassesFamilyTenant()) {
+            return true;
+        }
+
+        if (! SchemaCompat::hasTable('family_members')) {
+            return $this->family_id !== null;
+        }
+
+        return FamilyMember::query()
+            ->where('user_id', $this->id)
+            ->where('status', 'active')
+            ->exists();
+    }
+
+    /**
+     * Si el núcleo actual está inactivo, apunta a otro núcleo activo del usuario.
+     * No toca account_status: desactivar un núcleo ≠ desactivar la cuenta.
+     *
+     * @return bool True si quedó con un núcleo activo (o no aplica tenant).
+     */
+    public function ensureActiveFamilyContext(): bool
+    {
+        $this->activeFamilyMembershipCache = null;
+
+        if ($this->bypassesFamilyTenant()) {
+            return true;
+        }
+
+        if (! SchemaCompat::hasTable('family_members')) {
+            return $this->family_id !== null;
+        }
+
+        if ($this->hasActiveFamilyMembership()) {
+            return true;
+        }
+
+        $other = FamilyMember::query()
+            ->where('user_id', $this->id)
+            ->where('status', 'active')
+            ->orderBy('joined_at')
+            ->first();
+
+        if ($other === null) {
+            return false;
+        }
+
+        $this->forceFill([
+            'family_id' => $other->family_id,
+            'role' => $other->role,
+        ])->save();
+
+        $this->activeFamilyMembershipCache = true;
+
+        return true;
+    }
+
+    /** Invalida cache de membresía (p. ej. tras desactivar en un núcleo). */
+    public function clearFamilyMembershipCache(): void
+    {
+        $this->activeFamilyMembershipCache = null;
+        $this->isFamilyOwnerCache = null;
+    }
+
     public function apiTokens(): HasMany
     {
         return $this->hasMany(ApiToken::class);
@@ -181,12 +247,38 @@ class User extends Authenticatable
 
     public function canManageFinances(): bool
     {
+        $override = $this->modulePermissionOverride('can_finances');
+        if ($override !== null) {
+            return $override;
+        }
+
         return $this->familyRole()->canManageFinances();
     }
 
     public function canManageTasks(): bool
     {
+        $override = $this->modulePermissionOverride('can_tasks');
+        if ($override !== null) {
+            return $override;
+        }
+
         return $this->familyRole()->canManageTasks();
+    }
+
+    /** Override de módulo en family_members (null = usar rol). */
+    private function modulePermissionOverride(string $column): ?bool
+    {
+        if ($this->family_id === null || ! SchemaCompat::hasColumn('family_members', $column)) {
+            return null;
+        }
+
+        $value = FamilyMember::query()
+            ->where('family_id', $this->family_id)
+            ->where('user_id', $this->id)
+            ->where('status', 'active')
+            ->value($column);
+
+        return $value === null ? null : (bool) $value;
     }
 
     public function canManageSupportTickets(): bool

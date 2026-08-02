@@ -81,14 +81,9 @@ final class LoginUserAction
             ];
         }
 
-        if (! $user->hasActiveFamilyMembership()) {
-            return [
-                'ok' => false,
-                'status' => 403,
-                'message' => 'Tu acceso a este núcleo familiar fue desactivado por el dueño de la membresía. Contacta al dueño para reactivarlo.',
-                'code' => 'family_membership_inactive',
-            ];
-        }
+        // Desactivar en un núcleo ≠ bloquear login. Solo account_status lo hace.
+        // Si el núcleo actual está inactivo, apunta a otro donde siga activo.
+        $user->ensureActiveFamilyContext();
 
         $deviceId = $credentials['device_id'] ?? null;
         if (is_string($deviceId) && $deviceId !== '') {

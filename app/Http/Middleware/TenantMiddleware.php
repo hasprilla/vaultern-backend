@@ -31,9 +31,10 @@ class TenantMiddleware
             return response()->json(['error' => 'Tenant not found'], 403);
         }
 
-        if (! $user->hasActiveFamilyMembership()) {
+        // Si este núcleo está inactivo, intenta otro núcleo del mismo usuario.
+        if (! $user->hasActiveFamilyMembership() && ! $user->ensureActiveFamilyContext()) {
             return response()->json([
-                'message' => 'Tu acceso a este núcleo familiar fue desactivado por el dueño de la membresía.',
+                'message' => 'Tu acceso a este núcleo familiar fue desactivado por el dueño. Tu cuenta sigue activa; si perteneces a otra familia, entra con ella o pide reactivación.',
                 'code'    => 'family_membership_inactive',
             ], 403);
         }

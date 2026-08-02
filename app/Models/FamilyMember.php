@@ -20,6 +20,8 @@ class FamilyMember extends Model
         'family_id',
         'user_id',
         'role',
+        'can_tasks',
+        'can_finances',
         'status',
         'joined_at',
     ];
@@ -28,6 +30,8 @@ class FamilyMember extends Model
     {
         return [
             'joined_at' => 'datetime',
+            'can_tasks' => 'boolean',
+            'can_finances' => 'boolean',
         ];
     }
 
