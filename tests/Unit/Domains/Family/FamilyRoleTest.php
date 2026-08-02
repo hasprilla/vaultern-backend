@@ -125,6 +125,8 @@ class FamilyRoleTest extends TestCase
         $this->assertSame(FamilyRole::TUTOR, FamilyRole::from('tutor'));
         $this->assertSame(FamilyRole::HIJO,  FamilyRole::from('hijo'));
         $this->assertSame(FamilyRole::SOPORTE, FamilyRole::from('soporte'));
+        $this->assertSame(FamilyRole::DOCENTE, FamilyRole::from('docente'));
+        $this->assertSame(FamilyRole::ADMIN_ESCUELA, FamilyRole::from('admin_escuela'));
     }
 
     public function test_invalid_value_throws_exception(): void
@@ -133,8 +135,8 @@ class FamilyRoleTest extends TestCase
         FamilyRole::from('admin');
     }
 
-    public function test_all_roles_count_is_five(): void
+    public function test_all_roles_count_is_seven(): void
     {
-        $this->assertCount(5, FamilyRole::cases());
+        $this->assertCount(7, FamilyRole::cases());
     }
 }

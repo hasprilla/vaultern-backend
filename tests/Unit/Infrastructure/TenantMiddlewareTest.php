@@ -28,11 +28,11 @@ class TenantMiddlewareTest extends TestCase
         $this->assertSame('next',    $params[1]->getName());
     }
 
-    public function test_handle_return_type_is_mixed(): void
+    public function test_handle_return_type_is_response(): void
     {
         $reflection = new \ReflectionMethod(TenantMiddleware::class, 'handle');
         $returnType = $reflection->getReturnType();
         $this->assertNotNull($returnType);
-        $this->assertSame('mixed', (string) $returnType);
+        $this->assertSame(\Symfony\Component\HttpFoundation\Response::class, (string) $returnType);
     }
 }

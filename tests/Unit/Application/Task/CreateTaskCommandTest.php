@@ -11,16 +11,28 @@ class CreateTaskCommandTest extends TestCase
 {
     private function makeCommand(array $overrides = []): CreateTaskCommand
     {
+        $data = array_merge([
+            'familyId'    => 'family-uuid-123',
+            'title'       => 'Tarea de Matemáticas',
+            'description' => 'Ejercicios del capítulo 5',
+            'createdBy'   => 'user-uuid-456',
+            'assignedTo'  => 'user-uuid-789',
+            'priority'    => 'alta',
+            'dueDate'     => '2026-07-01',
+            'isSchool'    => true,
+            'subject'     => 'Matemáticas',
+        ], $overrides);
+
         return new CreateTaskCommand(
-            familyId:    $overrides['familyId']    ?? 'family-uuid-123',
-            title:       $overrides['title']       ?? 'Tarea de Matemáticas',
-            description: $overrides['description'] ?? 'Ejercicios del capítulo 5',
-            createdBy:   $overrides['createdBy']   ?? 'user-uuid-456',
-            assignedTo:  $overrides['assignedTo']  ?? 'user-uuid-789',
-            priority:    $overrides['priority']    ?? 'alta',
-            dueDate:     $overrides['dueDate']     ?? '2026-07-01',
-            isSchool:    $overrides['isSchool']    ?? true,
-            subject:     $overrides['subject']     ?? 'Matemáticas',
+            familyId:    $data['familyId'],
+            title:       $data['title'],
+            description: $data['description'],
+            createdBy:   $data['createdBy'],
+            assignedTo:  $data['assignedTo'],
+            priority:    $data['priority'],
+            dueDate:     $data['dueDate'],
+            isSchool:    $data['isSchool'],
+            subject:     $data['subject'],
         );
     }
 
