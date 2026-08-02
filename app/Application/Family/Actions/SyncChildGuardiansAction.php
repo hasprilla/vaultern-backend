@@ -32,24 +32,35 @@ final class SyncChildGuardiansAction
             ];
         }
 
+        $uniqueIds = array_values(array_unique(array_map('intval', $guardianIds)));
+        if ($uniqueIds === []) {
+            return [
+                'ok' => false,
+                'status' => 422,
+                'message' => 'Debes asignar al menos un custodio.',
+            ];
+        }
+
         $activeGuardianIds = FamilyMember::query()
             ->where('family_id', $familyId)
             ->where('status', 'active')
             ->whereIn('role', ['padre', 'madre', 'tutor'])
-            ->whereIn('user_id', $guardianIds)
+            ->whereIn('user_id', $uniqueIds)
             ->pluck('user_id')
             ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
             ->all();
 
-        if (count($activeGuardianIds) !== count(array_unique($guardianIds))) {
+        if (count($activeGuardianIds) !== count($uniqueIds)) {
             return [
                 'ok' => false,
                 'status' => 422,
-                'message' => 'Solo puedes asignar custodios con acceso activo al núcleo familiar.',
+                'message' => 'Solo puedes asignar padres, madres o tutores con acceso activo al núcleo.',
             ];
         }
 
-        $this->guardians->syncForChild($child, $guardianIds);
+        $this->guardians->syncForChild($child, $activeGuardianIds);
         $child->load('guardians');
 
         return ['ok' => true, 'child' => $child];

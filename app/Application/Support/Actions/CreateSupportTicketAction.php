@@ -71,6 +71,14 @@ final class CreateSupportTicketAction
                 'entity_id' => $entityId,
                 'last_message_at' => now(),
             ]);
+
+            SupportTicketMessage::query()->create([
+                'id' => (string) Str::uuid(),
+                'ticket_id' => $ticket->id,
+                'user_id' => $user->id,
+                'body' => $validated['body'],
+                'is_staff' => false,
+            ]);
         } catch (Throwable $e) {
             report($e);
 
@@ -81,46 +89,47 @@ final class CreateSupportTicketAction
             ];
         }
 
-        SupportTicketMessage::query()->create([
-            'id' => (string) Str::uuid(),
-            'ticket_id' => $ticket->id,
-            'user_id' => $user->id,
-            'body' => $validated['body'],
-            'is_staff' => false,
-        ]);
-
+        // Efectos secundarios: no deben tumbar el reclamo si ya se creó.
         if ($linkedPayment !== null) {
-            SubscriptionPaymentEvent::query()->create([
-                'id' => (string) Str::uuid(),
-                'payment_id' => $linkedPayment->id,
-                'user_id' => $user->id,
-                'event_type' => 'claim_opened',
-                'message' => 'Reclamo PQRS abierto: '.$ticket->subject,
-                'payload' => [
-                    'ticket_id' => $ticket->id,
-                    'payment_reference' => $linkedPayment->payment_reference,
-                ],
-                'created_at' => now(),
-            ]);
+            try {
+                SubscriptionPaymentEvent::query()->create([
+                    'id' => (string) Str::uuid(),
+                    'payment_id' => $linkedPayment->id,
+                    'user_id' => $user->id,
+                    'event_type' => 'claim_opened',
+                    'message' => 'Reclamo PQRS abierto: '.$ticket->subject,
+                    'payload' => [
+                        'ticket_id' => $ticket->id,
+                        'payment_reference' => $linkedPayment->payment_reference,
+                    ],
+                    'created_at' => now(),
+                ]);
+            } catch (Throwable $e) {
+                report($e);
+            }
         }
 
         $ticket->load(['requester:id,name,email', 'assignee:id,name', 'messages.author:id,name']);
 
-        if ($user->family_id !== null) {
-            $this->notifications->notifyFamily(
-                $user,
-                'support_ticket',
-                $linkedPayment !== null ? 'Reclamo de pago' : 'Ticket de soporte',
-                "{$user->name} abrió un ticket: {$ticket->subject}",
-                [
-                    'entity_type' => 'support_ticket',
-                    'entity_id' => $ticket->id,
-                    'related_payment_id' => $linkedPayment?->id,
-                ],
-            );
-        }
+        try {
+            if ($user->family_id !== null) {
+                $this->notifications->notifyFamily(
+                    $user,
+                    'support_ticket',
+                    $linkedPayment !== null ? 'Reclamo de pago' : 'Ticket de soporte',
+                    "{$user->name} abrió un ticket: {$ticket->subject}",
+                    [
+                        'entity_type' => 'support_ticket',
+                        'entity_id' => $ticket->id,
+                        'related_payment_id' => $linkedPayment?->id,
+                    ],
+                );
+            }
 
-        $this->broadcastTicketToStaff($ticket, 'created', (int) $user->id);
+            $this->broadcastTicketToStaff($ticket, 'created', (int) $user->id);
+        } catch (Throwable $e) {
+            report($e);
+        }
 
         return ['ok' => true, 'ticket' => $ticket];
     }
