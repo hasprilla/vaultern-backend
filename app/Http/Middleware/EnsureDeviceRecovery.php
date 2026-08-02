@@ -45,13 +45,8 @@ class EnsureDeviceRecovery
             return $next($request);
         }
 
-        if ($user->mustSetupDeviceRecovery()) {
-            return response()->json([
-                'message' => 'Configura tu clave secreta y pregunta de seguridad para proteger el cambio de dispositivo.',
-                'code' => 'requires_device_recovery_setup',
-            ], 403);
-        }
-
+        // Setup inicial: no bloquear toda la API (la app fuerza el formulario vía /me + UI).
+        // Sí bloqueamos tras cambio de dispositivo hasta rotar la clave.
         if ($user->mustRotateDeviceSecret()) {
             return response()->json([
                 'message' => 'Tras el cambio de dispositivo debes actualizar tu clave secreta.',

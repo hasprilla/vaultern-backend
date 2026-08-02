@@ -36,9 +36,11 @@ class DeviceRecoveryApiTest extends TestCase
             'device_secret_must_rotate' => false,
         ])->save();
 
-        $this->getJson('/api/v1/families', $this->authHeaders($tokens))
-            ->assertForbidden()
-            ->assertJsonPath('code', 'requires_device_recovery_setup');
+        // Setup inicial ya no bloquea la API; /me indica que falta configurar.
+        $this->getJson('/api/v1/families', $this->authHeaders($tokens))->assertOk();
+        $this->getJson('/api/v1/auth/me', $this->authHeaders($tokens))
+            ->assertOk()
+            ->assertJsonPath('data.device_recovery_setup_required', true);
 
         $this->postJson('/api/v1/auth/device/recovery', [
             'secret' => 'clave-secreta-1',
@@ -50,6 +52,9 @@ class DeviceRecoveryApiTest extends TestCase
         $user->refresh();
         $this->assertTrue($user->hasDeviceRecoveryConfigured());
 
+        $this->getJson('/api/v1/auth/me', $this->authHeaders($tokens))
+            ->assertOk()
+            ->assertJsonPath('data.device_recovery_setup_required', false);
         $this->getJson('/api/v1/families', $this->authHeaders($tokens))->assertOk();
     }
 
