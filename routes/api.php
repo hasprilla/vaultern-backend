@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\V1\Auth\MfaController;
 use App\Http\Controllers\Api\V1\Dashboard\DashboardController;
 use App\Http\Controllers\Api\V1\Family\FamilyController;
 use App\Http\Controllers\Api\V1\Family\ParentMessageController;
+use App\Http\Controllers\Api\V1\Finance\ChildSupportController;
 use App\Http\Controllers\Api\V1\Finance\FinanceController;
 use App\Http\Controllers\Api\V1\Notification\NotificationController;
 use App\Http\Controllers\Api\V1\Ocr\OcrController;
@@ -83,6 +84,8 @@ Route::prefix('v1')->middleware(['api.auth', 'tenant'])->group(function () {
     Route::apiResource('tasks', TaskController::class);
     Route::patch('/tasks/{task}/complete', [TaskController::class, 'complete']);
     Route::patch('/tasks/{task}/assign', [TaskController::class, 'assign']);
+    Route::post('/tasks/{task}/attachments', [TaskController::class, 'storeAttachments']);
+    Route::delete('/tasks/{task}/attachments/{attachment}', [TaskController::class, 'destroyAttachment']);
 
     Route::get('/ocr', [OcrController::class, 'index']);
     Route::get('/ocr/usage', [OcrController::class, 'usage']);
@@ -97,6 +100,8 @@ Route::prefix('v1')->middleware(['api.auth', 'tenant'])->group(function () {
     Route::put('/transactions/{transaction}', [FinanceController::class, 'update']);
     Route::patch('/transactions/{transaction}', [FinanceController::class, 'update']);
     Route::delete('/transactions/{transaction}', [FinanceController::class, 'destroy']);
+    Route::post('/transactions/{transaction}/attachments', [FinanceController::class, 'storeAttachments']);
+    Route::delete('/transactions/{transaction}/attachments/{attachment}', [FinanceController::class, 'destroyAttachment']);
 
     Route::get('/budgets', [FinanceController::class, 'budgetsIndex']);
     Route::post('/budgets', [FinanceController::class, 'budgetsStore']);
@@ -108,6 +113,12 @@ Route::prefix('v1')->middleware(['api.auth', 'tenant'])->group(function () {
     Route::get('/finance/reports/monthly', [FinanceController::class, 'monthlyReport']);
     Route::get('/finance/reports/quarterly', [FinanceController::class, 'quarterlyReport']);
     Route::get('/finance/reports/annual', [FinanceController::class, 'annualReport']);
+
+    Route::get('/finance/child-support', [ChildSupportController::class, 'index']);
+    Route::post('/finance/child-support', [ChildSupportController::class, 'store']);
+    Route::post('/finance/child-support/{agreement}/adjustments', [ChildSupportController::class, 'storeAdjustment']);
+    Route::post('/finance/child-support/{agreement}/payments', [ChildSupportController::class, 'storePayment']);
+    Route::post('/finance/child-support/{agreement}/end', [ChildSupportController::class, 'end']);
 
     Route::get('/dashboard/analytics', [DashboardController::class, 'analytics']);
 

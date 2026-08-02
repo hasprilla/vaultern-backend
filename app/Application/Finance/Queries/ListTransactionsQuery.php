@@ -20,7 +20,7 @@ final class ListTransactionsQuery
     public function execute(User $viewer, ?int $childId, int $perPage): LengthAwarePaginator
     {
         $query = $this->transactionsForGuardian($viewer, $this->guardians)
-            ->with('child')
+            ->with(['child', 'attachments'])
             ->orderByDesc('transaction_date');
 
         if ($childId !== null) {

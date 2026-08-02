@@ -28,7 +28,8 @@ final class CreateTransactionAction
      *   category?: string|null,
      *   description?: string|null,
      *   transaction_date: string,
-     *   child_id: int
+     *   child_id: int,
+     *   ocr_job_id?: string|null
      * }  $validated
      * @return CreateTxSuccess|CreateTxFailure
      */
@@ -53,6 +54,7 @@ final class CreateTransactionAction
             'category' => $validated['category'] ?? null,
             'description' => $validated['description'] ?? null,
             'transaction_date' => $validated['transaction_date'],
+            'ocr_job_id' => $validated['ocr_job_id'] ?? null,
         ]);
 
         $transaction->load('child');

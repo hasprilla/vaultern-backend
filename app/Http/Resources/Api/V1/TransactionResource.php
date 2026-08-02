@@ -29,6 +29,7 @@ class TransactionResource extends JsonResource
                 'id' => (string) $this->child->id,
                 'name' => $this->child->name,
             ]),
+            'attachments' => AttachmentResource::collection($this->whenLoaded('attachments')),
         ];
     }
 }

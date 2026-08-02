@@ -35,6 +35,7 @@ class TaskResource extends JsonResource
                 'id' => (string) $this->assignee->id,
                 'name' => $this->assignee->name,
             ]),
+            'attachments' => AttachmentResource::collection($this->whenLoaded('attachments')),
         ];
     }
 }

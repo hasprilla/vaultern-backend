@@ -4,15 +4,13 @@ declare(strict_types=1);
 
 namespace App\Models;
 
-use App\Models\Concerns\BelongsToFamily;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 
-class Transaction extends Model
+class ChildSupportPayment extends Model
 {
-    use BelongsToFamily;
     use HasUuids;
 
     public $incrementing = false;
@@ -20,34 +18,40 @@ class Transaction extends Model
     protected $keyType = 'string';
 
     protected $fillable = [
+        'agreement_id',
         'family_id',
-        'user_id',
         'child_id',
+        'paid_by',
+        'transaction_id',
         'amount',
         'currency',
-        'type',
-        'category',
-        'description',
-        'transaction_date',
-        'ocr_job_id',
+        'period_month',
+        'paid_on',
+        'notes',
     ];
 
     protected function casts(): array
     {
         return [
-            'amount'           => 'decimal:2',
-            'transaction_date' => 'date',
+            'amount' => 'decimal:2',
+            'period_month' => 'date',
+            'paid_on' => 'date',
         ];
     }
 
-    public function user(): BelongsTo
+    public function agreement(): BelongsTo
     {
-        return $this->belongsTo(User::class);
+        return $this->belongsTo(ChildSupportAgreement::class, 'agreement_id');
     }
 
-    public function child(): BelongsTo
+    public function transaction(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'child_id');
+        return $this->belongsTo(Transaction::class, 'transaction_id');
+    }
+
+    public function payer(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'paid_by');
     }
 
     public function attachments(): MorphMany

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1\Task;
 
+use App\Application\Shared\Actions\DeleteAttachmentAction;
+use App\Application\Shared\Actions\StoreAttachmentsAction;
 use App\Application\Task\Actions\AssignTaskAction;
 use App\Application\Task\Actions\CompleteTaskAction;
 use App\Application\Task\Actions\CreateTaskAction;
@@ -30,6 +32,8 @@ class TaskController extends Controller
         private readonly CompleteTaskAction $completeTask,
         private readonly DeleteTaskAction $deleteTask,
         private readonly AssignTaskAction $assignTask,
+        private readonly StoreAttachmentsAction $storeAttachmentsAction,
+        private readonly DeleteAttachmentAction $deleteAttachmentAction,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -42,7 +46,7 @@ class TaskController extends Controller
             $this->perPage($request),
         );
 
-        return response()->json($tasks);
+        return TaskResource::collection($tasks)->response();
     }
 
     public function store(Request $request): JsonResponse
@@ -59,16 +63,31 @@ class TaskController extends Controller
             'due_date' => ['nullable', 'date'],
             'is_school' => ['nullable', 'boolean'],
             'subject' => ['nullable', 'string', 'max:120'],
+            'attachments' => ['nullable', 'array', 'max:5'],
+            'attachments.*' => ['file', 'mimes:jpeg,jpg,png,webp,pdf', 'max:10240'],
         ]);
 
+        $files = $request->file('attachments', []);
+        unset($validated['attachments']);
+
         $task = $this->createTask->execute($request->user(), $validated);
+        if ($files !== []) {
+            $this->storeAttachmentsAction->execute(
+                $request->user(),
+                $task,
+                is_array($files) ? $files : [$files],
+                'tasks',
+                'image',
+            );
+        }
+        $task->load(['creator', 'assignee', 'attachments']);
 
         return response()->json(['data' => new TaskResource($task)], 201);
     }
 
     public function show(string $task): JsonResponse
     {
-        $model = Task::query()->with(['creator', 'assignee'])->findOrFail($task);
+        $model = Task::query()->with(['creator', 'assignee', 'attachments'])->findOrFail($task);
 
         if ($forbidden = $this->forbidUnlessAuthorized('view', $model)) {
             return $forbidden;
@@ -94,8 +113,49 @@ class TaskController extends Controller
         ]);
 
         $model = $this->updateTask->execute($request->user(), $model, $validated);
+        $model->load(['creator', 'assignee', 'attachments']);
 
         return response()->json(['data' => new TaskResource($model)]);
+    }
+
+    public function storeAttachments(Request $request, string $task): JsonResponse
+    {
+        $model = Task::query()->findOrFail($task);
+
+        if ($forbidden = $this->forbidUnlessAuthorized('update', $model)) {
+            return $forbidden;
+        }
+
+        $request->validate([
+            'attachments' => ['required', 'array', 'min:1', 'max:5'],
+            'attachments.*' => ['file', 'mimes:jpeg,jpg,png,webp,pdf', 'max:10240'],
+        ]);
+
+        $files = $request->file('attachments', []);
+        $this->storeAttachmentsAction->execute(
+            $request->user(),
+            $model,
+            is_array($files) ? $files : [$files],
+            'tasks',
+            'image',
+        );
+        $model->load(['creator', 'assignee', 'attachments']);
+
+        return response()->json(['data' => new TaskResource($model)]);
+    }
+
+    public function destroyAttachment(Request $request, string $task, string $attachment): JsonResponse
+    {
+        $model = Task::query()->findOrFail($task);
+
+        if ($forbidden = $this->forbidUnlessAuthorized('update', $model)) {
+            return $forbidden;
+        }
+
+        $file = $model->attachments()->whereKey($attachment)->firstOrFail();
+        $this->deleteAttachmentAction->execute($request->user(), $file);
+
+        return response()->json(['message' => 'Archivo eliminado']);
     }
 
     public function destroy(Request $request, string $task): JsonResponse

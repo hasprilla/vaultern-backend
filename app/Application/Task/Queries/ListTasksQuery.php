@@ -14,7 +14,7 @@ final class ListTasksQuery
      */
     public function execute(array $filters, int $perPage): LengthAwarePaginator
     {
-        $query = Task::query()->with(['creator', 'assignee']);
+        $query = Task::query()->with(['creator', 'assignee', 'attachments']);
 
         if (! empty($filters['assigned_to'])) {
             $query->where('assigned_to', $filters['assigned_to']);
