@@ -72,6 +72,7 @@ Route::prefix('v1')->middleware(['api.auth', 'tenant'])->group(function () {
     Route::post('/families/{family}/invite', [FamilyController::class, 'invite']);
     Route::post('/families/{family}/children', [FamilyController::class, 'registerChild']);
     Route::put('/families/{family}/children/{child}/guardians', [FamilyController::class, 'syncChildGuardians']);
+    Route::put('/families/{family}/members/{member}/child-access', [FamilyController::class, 'syncParentChildAccess']);
     Route::get('/families/{family}/join-requests', [FamilyController::class, 'joinRequests']);
     Route::post('/families/{family}/join-requests/{joinRequest}/approve', [FamilyController::class, 'approveJoinRequest']);
     Route::post('/families/{family}/join-requests/{joinRequest}/reject', [FamilyController::class, 'rejectJoinRequest']);

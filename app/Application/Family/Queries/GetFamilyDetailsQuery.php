@@ -42,6 +42,15 @@ final class GetFamilyDetailsQuery
             $isOwner = true;
         }
 
+        // Match por email del dueño (por si el id de sesión no alinea en algún edge case).
+        if (! $isOwner && $family->owner_user_id !== null) {
+            $ownerEmail = User::query()->where('id', $family->owner_user_id)->value('email');
+            if (is_string($ownerEmail)
+                && strcasecmp(trim($ownerEmail), trim((string) $viewer->email)) === 0) {
+                $isOwner = true;
+            }
+        }
+
         // Si la columna está vacía, auto-asignar al viewer cuando es el primer padre/madre.
         if (! $isOwner && $family->owner_user_id === null
             && in_array($viewer->role, ['padre', 'madre'], true)) {

@@ -13,6 +13,7 @@ use App\Application\Family\Actions\ReactivateMemberAction;
 use App\Application\Family\Actions\RegisterChildAction;
 use App\Application\Family\Actions\RejectJoinRequestAction;
 use App\Application\Family\Actions\SyncChildGuardiansAction;
+use App\Application\Family\Actions\SyncParentChildAccessAction;
 use App\Application\Family\Actions\UpdateFamilyAction;
 use App\Application\Family\Queries\GetFamilyDetailsQuery;
 use App\Application\Family\Queries\ListPendingJoinRequestsQuery;
@@ -40,6 +41,7 @@ class FamilyController extends Controller
         private readonly RejectJoinRequestAction $rejectJoinRequestAction,
         private readonly AssignMemberRoleAction $assignMemberRole,
         private readonly SyncChildGuardiansAction $syncChildGuardiansAction,
+        private readonly SyncParentChildAccessAction $syncParentChildAccessAction,
         private readonly DeactivateMemberAction $deactivateMemberAction,
         private readonly ReactivateMemberAction $reactivateMemberAction,
     ) {}
@@ -184,6 +186,43 @@ class FamilyController extends Controller
         }
 
         return response()->json(['data' => new UserResource($result['child'])]);
+    }
+
+    /**
+     * Dueño otorga a un padre/madre/tutor acceso a hijos concretos.
+     */
+    public function syncParentChildAccess(Request $request, string $family, string $member): JsonResponse
+    {
+        $this->assertFamilyAccess($request, $family);
+
+        $parent = User::query()
+            ->where('family_id', $family)
+            ->whereIn('role', ['padre', 'madre', 'tutor'])
+            ->findOrFail($member);
+
+        $validated = $request->validate([
+            'child_ids' => ['present', 'array'],
+            'child_ids.*' => ['integer', 'exists:users,id'],
+        ]);
+
+        $result = $this->syncParentChildAccessAction->execute(
+            $request->user(),
+            $family,
+            $parent,
+            $validated['child_ids'],
+        );
+
+        if (($result['ok'] ?? false) !== true) {
+            return response()->json(['message' => $result['message']], $result['status']);
+        }
+
+        return response()->json([
+            'message' => 'Permisos actualizados',
+            'data' => [
+                'parent_id' => $result['parent_id'],
+                'child_ids' => $result['child_ids'],
+            ],
+        ]);
     }
 
     public function joinRequests(Request $request, string $family): JsonResponse
