@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Support;
 
+use App\Events\FamilyPermissionsChanged;
 use App\Events\FamilyStatsInvalidated;
 use App\Events\FinanceChanged;
 use App\Events\OcrJobUpdated;
@@ -71,6 +72,32 @@ final class FamilyRealtime
             ocrType: $ocrType,
             action: $action,
         ));
+    }
+
+    /**
+     * @param  list<int|string>  $childIds
+     * @param  list<int|string>  $guardianIds
+     */
+    public static function permissionsChanged(
+        string $familyId,
+        string $action,
+        ?string $childId = null,
+        ?string $parentId = null,
+        array $childIds = [],
+        array $guardianIds = [],
+        ?int $actorId = null,
+    ): void {
+        event(new FamilyPermissionsChanged(
+            familyId: $familyId,
+            action: $action,
+            childId: $childId,
+            parentId: $parentId,
+            childIds: $childIds,
+            guardianIds: $guardianIds,
+            actorId: $actorId,
+        ));
+
+        self::invalidateStats($familyId, 'permissions');
     }
 
     public static function invalidateStats(string $familyId, string $reason = 'changed'): void

@@ -8,7 +8,9 @@ use App\Models\Family;
 use App\Models\FamilyMember;
 use App\Models\User;
 use App\Services\ChildGuardianService;
+use App\Services\FamilyNotificationService;
 use App\Support\FamilyOwnership;
+use App\Support\FamilyRealtime;
 
 /**
  * El dueño otorga a un padre/madre/tutor acceso a hijos concretos.
@@ -20,6 +22,7 @@ final class SyncParentChildAccessAction
 {
     public function __construct(
         private readonly ChildGuardianService $guardians,
+        private readonly FamilyNotificationService $notifications,
     ) {}
 
     /**
@@ -99,6 +102,45 @@ final class SyncParentChildAccessAction
             }
 
             $this->guardians->syncForChild($child, $next);
+        }
+
+        FamilyRealtime::permissionsChanged(
+            familyId: $familyId,
+            action: 'parent_child_access_synced',
+            parentId: (string) $parent->id,
+            childIds: $wanted,
+            guardianIds: [(int) $parent->id],
+            actorId: (int) $actor->id,
+        );
+
+        $this->notifications->notifyFamily(
+            $actor,
+            'family_permissions',
+            'Permisos actualizados',
+            "Se actualizó el acceso de {$parent->name} a la información de los hijos.",
+            [
+                'entity_type' => 'family_permissions',
+                'entity_id' => (string) $parent->id,
+                'parent_id' => (string) $parent->id,
+                'action' => 'parent_child_access_synced',
+            ],
+        );
+
+        // Aviso directo al adulto al que se le otorgaron/quitaron permisos.
+        if ((int) $parent->id !== (int) $actor->id) {
+            $this->notifications->notifyUsers(
+                $actor,
+                [(int) $parent->id],
+                'family_permissions',
+                'Tus permisos cambiaron',
+                'El dueño actualizó a qué hijos puedes ver.',
+                [
+                    'entity_type' => 'family_permissions',
+                    'entity_id' => (string) $parent->id,
+                    'parent_id' => (string) $parent->id,
+                    'action' => 'parent_child_access_synced',
+                ],
+            );
         }
 
         return [

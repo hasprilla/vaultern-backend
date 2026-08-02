@@ -8,7 +8,9 @@ use App\Models\Family;
 use App\Models\FamilyMember;
 use App\Models\User;
 use App\Services\ChildGuardianService;
+use App\Services\FamilyNotificationService;
 use App\Support\FamilyOwnership;
+use App\Support\FamilyRealtime;
 
 /**
  * @phpstan-type SyncSuccess array{ok: true, child: User}
@@ -18,6 +20,7 @@ final class SyncChildGuardiansAction
 {
     public function __construct(
         private readonly ChildGuardianService $guardians,
+        private readonly FamilyNotificationService $notifications,
     ) {}
 
     /**
@@ -68,6 +71,28 @@ final class SyncChildGuardiansAction
 
         $this->guardians->syncForChild($child, $activeGuardianIds);
         $child->load('guardians');
+
+        FamilyRealtime::permissionsChanged(
+            familyId: $familyId,
+            action: 'child_guardians_synced',
+            childId: (string) $child->id,
+            childIds: [(string) $child->id],
+            guardianIds: $activeGuardianIds,
+            actorId: (int) $actor->id,
+        );
+
+        $this->notifications->notifyFamily(
+            $actor,
+            'family_permissions',
+            'Permisos actualizados',
+            "Se actualizó quién puede ver la información de {$child->name}.",
+            [
+                'entity_type' => 'family_permissions',
+                'entity_id' => (string) $child->id,
+                'child_id' => (string) $child->id,
+                'action' => 'child_guardians_synced',
+            ],
+        );
 
         return ['ok' => true, 'child' => $child];
     }
