@@ -9,6 +9,7 @@ use App\Models\SubscriptionPayment;
 use App\Models\SubscriptionPlan;
 use App\Models\User;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Throwable;
 
 final class GetPaymentReceiptAction
 {
@@ -17,7 +18,10 @@ final class GetPaymentReceiptAction
      */
     public function execute(User $user, SubscriptionPayment $payment): array
     {
-        if ($user->family_id === null || $payment->family_id !== $user->family_id) {
+        if (
+            $user->family_id === null
+            || (string) $payment->family_id !== (string) $user->family_id
+        ) {
             return ['ok' => false, 'status' => 403, 'message' => 'No autorizado'];
         }
 
@@ -26,6 +30,14 @@ final class GetPaymentReceiptAction
                 'ok' => false,
                 'status' => 422,
                 'message' => 'Solo se puede emitir comprobante de pagos aprobados.',
+            ];
+        }
+
+        if (! class_exists(\Dompdf\Dompdf::class)) {
+            return [
+                'ok' => false,
+                'status' => 500,
+                'message' => 'Falta DomPDF en el servidor. Sube vendor/ (barryvdh + dompdf) y ejecuta: php artisan package:discover && php artisan config:clear',
             ];
         }
 
@@ -47,27 +59,39 @@ final class GetPaymentReceiptAction
             default => (string) ($payment->provider ?: '—'),
         };
 
-        $pdf = Pdf::loadView('receipts.subscription_payment', [
-            'reference' => $payment->payment_reference,
-            'amount' => $amount,
-            'currency' => $currency,
-            'paidAt' => $paidAt,
-            'planLabel' => $planLabel,
-            'billing' => $billing,
-            'card' => $card,
-            'holder' => $payment->card_holder_name ?: '—',
-            'provider' => $provider,
-            'payerName' => $payment->user?->name ?? '—',
-            'payerEmail' => $payment->user?->email ?? '—',
-            'familyName' => $family?->name ?? '—',
-            'issuedAt' => now()->timezone(config('app.timezone'))->format('d/m/Y H:i'),
-        ])->setPaper('letter');
+        try {
+            $pdf = Pdf::loadView('receipts.subscription_payment', [
+                'reference' => $payment->payment_reference,
+                'amount' => $amount,
+                'currency' => $currency,
+                'paidAt' => $paidAt,
+                'planLabel' => $planLabel,
+                'billing' => $billing,
+                'card' => $card,
+                'holder' => $payment->card_holder_name ?: '—',
+                'provider' => $provider,
+                'payerName' => $payment->user?->name ?? '—',
+                'payerEmail' => $payment->user?->email ?? '—',
+                'familyName' => $family?->name ?? '—',
+                'issuedAt' => now()->timezone(config('app.timezone'))->format('d/m/Y H:i'),
+            ])->setPaper('letter');
+
+            $binary = $pdf->output();
+        } catch (Throwable $e) {
+            report($e);
+
+            return [
+                'ok' => false,
+                'status' => 500,
+                'message' => 'No se pudo generar el PDF del comprobante. Verifica vendor DomPDF y permisos de storage/framework en cPanel.',
+            ];
+        }
 
         $safeRef = preg_replace('/[^A-Za-z0-9_-]/', '', (string) $payment->payment_reference) ?: $payment->id;
 
         return [
             'ok' => true,
-            'pdf' => $pdf->output(),
+            'pdf' => $binary,
             'filename' => "comprobante-zumifly-{$safeRef}.pdf",
         ];
     }
