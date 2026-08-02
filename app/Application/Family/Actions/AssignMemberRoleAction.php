@@ -8,6 +8,7 @@ use App\Models\Family;
 use App\Models\FamilyMember;
 use App\Models\User;
 use App\Services\FamilyNotificationService;
+use App\Support\FamilyOwnership;
 
 /**
  * @phpstan-type AssignSuccess array{ok: true, member_id: string, new_role: string}
@@ -25,10 +26,7 @@ final class AssignMemberRoleAction
      */
     public function execute(User $actor, Family $family, string $memberId, array $validated): array
     {
-        $isOwner = $actor->isFamilyOwner()
-            || ($family->owner_user_id !== null
-                && (int) $family->owner_user_id === (int) $actor->id);
-        if (! $isOwner) {
+        if (! FamilyOwnership::actorIsOwner($actor, $family)) {
             return [
                 'ok' => false,
                 'status' => 403,

@@ -342,7 +342,7 @@ class FamilyController extends Controller
 
     private function assertFamilyAccess(Request $request, string $familyId): void
     {
-        if ($request->user()->family_id !== $familyId) {
+        if ((string) $request->user()->family_id !== (string) $familyId) {
             abort(403, 'Forbidden');
         }
     }

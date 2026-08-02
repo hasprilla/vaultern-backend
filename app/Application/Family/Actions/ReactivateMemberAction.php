@@ -8,6 +8,7 @@ use App\Models\Family;
 use App\Models\FamilyMember;
 use App\Models\User;
 use App\Services\FamilyNotificationService;
+use App\Support\FamilyOwnership;
 
 /**
  * @phpstan-type ReactivateSuccess array{ok: true, member_id: string}
@@ -25,11 +26,7 @@ final class ReactivateMemberAction
     public function execute(User $actor, string $familyId, string $memberId): array
     {
         $family = Family::query()->find($familyId);
-        $isOwner = $actor->isFamilyOwner()
-            || ($family !== null
-                && $family->owner_user_id !== null
-                && (int) $family->owner_user_id === (int) $actor->id);
-        if (! $isOwner) {
+        if (! FamilyOwnership::actorIsOwner($actor, $family)) {
             return [
                 'ok' => false,
                 'status' => 403,

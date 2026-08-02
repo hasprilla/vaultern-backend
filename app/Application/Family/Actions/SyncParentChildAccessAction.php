@@ -8,6 +8,7 @@ use App\Models\Family;
 use App\Models\FamilyMember;
 use App\Models\User;
 use App\Services\ChildGuardianService;
+use App\Support\FamilyOwnership;
 
 /**
  * El dueño otorga a un padre/madre/tutor acceso a hijos concretos.
@@ -28,12 +29,7 @@ final class SyncParentChildAccessAction
     public function execute(User $actor, string $familyId, User $parent, array $childIds): array
     {
         $family = Family::query()->find($familyId);
-        $isOwner = $actor->isFamilyOwner()
-            || ($family !== null
-                && $family->owner_user_id !== null
-                && (int) $family->owner_user_id === (int) $actor->id);
-
-        if (! $isOwner) {
+        if (! FamilyOwnership::actorIsOwner($actor, $family)) {
             return [
                 'ok' => false,
                 'status' => 403,

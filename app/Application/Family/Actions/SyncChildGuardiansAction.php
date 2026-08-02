@@ -8,6 +8,7 @@ use App\Models\Family;
 use App\Models\FamilyMember;
 use App\Models\User;
 use App\Services\ChildGuardianService;
+use App\Support\FamilyOwnership;
 
 /**
  * @phpstan-type SyncSuccess array{ok: true, child: User}
@@ -26,10 +27,7 @@ final class SyncChildGuardiansAction
     public function execute(User $actor, string $familyId, User $child, array $guardianIds): array
     {
         $family = Family::query()->find($familyId);
-        $isOwner = $actor->isFamilyOwner()
-            || ($family !== null
-                && $family->owner_user_id !== null
-                && (int) $family->owner_user_id === (int) $actor->id);
+        $isOwner = FamilyOwnership::actorIsOwner($actor, $family);
         $isGuardian = $this->guardians->isGuardianOf($actor, (int) $child->id);
         // Dueño de la membresía, o custodio ya autorizado sobre ese hijo.
         if (! $isOwner && ! $isGuardian) {

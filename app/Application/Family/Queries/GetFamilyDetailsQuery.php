@@ -9,6 +9,7 @@ use App\Models\Family;
 use App\Models\FamilyMember;
 use App\Models\User;
 use App\Services\ChildGuardianService;
+use App\Support\FamilyOwnership;
 use App\Support\SchemaCompat;
 
 final class GetFamilyDetailsQuery
@@ -32,27 +33,11 @@ final class GetFamilyDetailsQuery
     public function execute(User $viewer): array
     {
         $family = Family::query()->findOrFail($viewer->family_id);
-        // Alineado con User::isFamilyOwner (incluye fallback / auto-asignación).
-        $isOwner = $viewer->isFamilyOwner();
         $family->refresh();
 
-        // Cinturón y tirantes: si owner_user_id coincide, es dueño aunque el cache falle.
-        if (! $isOwner && $family->owner_user_id !== null
-            && (int) $family->owner_user_id === (int) $viewer->id) {
-            $isOwner = true;
-        }
-
-        // Match por email del dueño (por si el id de sesión no alinea en algún edge case).
-        if (! $isOwner && $family->owner_user_id !== null) {
-            $ownerEmail = User::query()->where('id', $family->owner_user_id)->value('email');
-            if (is_string($ownerEmail)
-                && strcasecmp(trim($ownerEmail), trim((string) $viewer->email)) === 0) {
-                $isOwner = true;
-            }
-        }
-
-        // Si la columna está vacía, auto-asignar al viewer cuando es el primer padre/madre.
-        if (! $isOwner && $family->owner_user_id === null
+        // Si la columna está vacía, auto-asignar al primer padre/madre (suele ser quien creó la cuenta).
+        if ($family->owner_user_id === null
+            && SchemaCompat::hasColumn('families', 'owner_user_id')
             && in_array($viewer->role, ['padre', 'madre'], true)) {
             $firstParentId = User::query()
                 ->where('family_id', $family->id)
@@ -61,9 +46,11 @@ final class GetFamilyDetailsQuery
                 ->value('id');
             if ($firstParentId !== null && (int) $firstParentId === (int) $viewer->id) {
                 $family->forceFill(['owner_user_id' => $viewer->id])->save();
-                $isOwner = true;
+                $family->refresh();
             }
         }
+
+        $isOwner = FamilyOwnership::actorIsOwner($viewer, $family);
 
         $with = SchemaCompat::hasTable('child_guardians')
             ? ['user.guardians']
@@ -115,6 +102,7 @@ final class GetFamilyDetailsQuery
             'invite_code' => $family->invite_code,
             'owner_user_id' => $family->owner_user_id !== null ? (string) $family->owner_user_id : null,
             'is_owner' => $isOwner,
+            'viewer_user_id' => (string) $viewer->id,
             'members' => $visible->values()->map(function (FamilyMember $m) {
                 $payload = (new UserResource($m->user))->resolve();
                 $payload['membership_status'] = $m->status;
