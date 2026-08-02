@@ -11,6 +11,7 @@ use App\Models\SupportTicket;
 use App\Models\SupportTicketMessage;
 use App\Models\User;
 use App\Services\FamilyNotificationService;
+use App\Support\SchemaCompat;
 use Illuminate\Support\Str;
 use Throwable;
 
@@ -59,7 +60,7 @@ final class CreateSupportTicketAction
         }
 
         try {
-            $ticket = SupportTicket::query()->create([
+            $payload = [
                 'id' => (string) Str::uuid(),
                 'family_id' => $user->family_id,
                 'user_id' => $user->id,
@@ -67,10 +68,24 @@ final class CreateSupportTicketAction
                 'category' => $validated['category'] ?? 'general',
                 'status' => 'open',
                 'priority' => $validated['priority'] ?? 'normal',
-                'entity_type' => $entityType,
-                'entity_id' => $entityId,
                 'last_message_at' => now(),
-            ]);
+            ];
+
+            // Compat: si aún no corrieron la migración de entity_*, el reclamo igual se crea.
+            if (
+                $entityType !== null
+                && SchemaCompat::hasColumn('support_tickets', 'entity_type')
+                && SchemaCompat::hasColumn('support_tickets', 'entity_id')
+            ) {
+                $payload['entity_type'] = $entityType;
+                $payload['entity_id'] = $entityId;
+            } elseif ($entityType !== null) {
+                report(new \RuntimeException(
+                    'support_tickets.entity_type/entity_id ausentes: reclamo creado sin vínculo al pago.',
+                ));
+            }
+
+            $ticket = SupportTicket::query()->create($payload);
 
             SupportTicketMessage::query()->create([
                 'id' => (string) Str::uuid(),
@@ -85,7 +100,7 @@ final class CreateSupportTicketAction
             return [
                 'ok' => false,
                 'status' => 500,
-                'message' => 'No se pudo crear el reclamo. Verifica que el servidor tenga la migración de soporte al día.',
+                'message' => 'No se pudo crear el reclamo. Intenta de nuevo en unos segundos.',
             ];
         }
 

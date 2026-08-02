@@ -113,21 +113,38 @@ class User extends Authenticatable
             return $this->isFamilyOwnerCache = false;
         }
 
-        // Compat cPanel: columna puede no existir hasta correr migrate.
-        if (! SchemaCompat::hasColumn('families', 'owner_user_id')) {
-            $firstParentId = self::query()
+        $resolveFirstParentId = function () {
+            return self::query()
                 ->where('family_id', $this->family_id)
                 ->whereIn('role', ['padre', 'madre'])
                 ->orderBy('id')
                 ->value('id');
+        };
 
-            return $this->isFamilyOwnerCache = (int) $firstParentId === (int) $this->id;
+        // Compat cPanel: columna puede no existir hasta correr migrate.
+        if (! SchemaCompat::hasColumn('families', 'owner_user_id')) {
+            return $this->isFamilyOwnerCache = (int) $resolveFirstParentId() === (int) $this->id;
         }
 
-        return $this->isFamilyOwnerCache = Family::query()
+        $ownerId = Family::query()
             ->where('id', $this->family_id)
-            ->where('owner_user_id', $this->id)
-            ->exists();
+            ->value('owner_user_id');
+
+        if ($ownerId !== null) {
+            return $this->isFamilyOwnerCache = (int) $ownerId === (int) $this->id;
+        }
+
+        // Columna existe pero está vacía: primer padre/madre es dueño y se auto-asigna.
+        $resolved = $resolveFirstParentId();
+        $isOwner = $resolved !== null && (int) $resolved === (int) $this->id;
+        if ($isOwner) {
+            Family::query()
+                ->where('id', $this->family_id)
+                ->whereNull('owner_user_id')
+                ->update(['owner_user_id' => $this->id]);
+        }
+
+        return $this->isFamilyOwnerCache = $isOwner;
     }
 
     /** Membresía activa en su núcleo familiar actual (sin borrar datos al desactivar). */

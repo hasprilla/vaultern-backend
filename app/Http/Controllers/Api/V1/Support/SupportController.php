@@ -15,6 +15,7 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use Throwable;
 
 class SupportController extends Controller
 {
@@ -135,17 +136,21 @@ class SupportController extends Controller
     {
         $data = $ticket->toArray();
 
-        if ($ticket->entity_type === 'subscription_payment' && filled($ticket->entity_id)) {
-            $payment = SubscriptionPayment::query()->find($ticket->entity_id);
-            if ($payment !== null) {
-                $data['related_payment'] = [
-                    'id' => $payment->id,
-                    'payment_reference' => $payment->payment_reference,
-                    'amount_cents' => $payment->amount_cents,
-                    'currency' => $payment->currency,
-                    'status' => $payment->status,
-                ];
+        try {
+            if (($data['entity_type'] ?? null) === 'subscription_payment' && filled($data['entity_id'] ?? null)) {
+                $payment = SubscriptionPayment::query()->find($data['entity_id']);
+                if ($payment !== null) {
+                    $data['related_payment'] = [
+                        'id' => (string) $payment->id,
+                        'payment_reference' => $payment->payment_reference,
+                        'amount_cents' => (int) $payment->amount_cents,
+                        'currency' => $payment->currency,
+                        'status' => $payment->status,
+                    ];
+                }
             }
+        } catch (Throwable) {
+            // El ticket ya existe; no tumbar la respuesta por el enlace al pago.
         }
 
         return $data;
