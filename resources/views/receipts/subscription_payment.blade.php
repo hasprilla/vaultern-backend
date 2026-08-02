@@ -18,11 +18,30 @@
             padding-bottom: 14px;
             margin-bottom: 18px;
         }
+        .brand-wrap {
+            display: table;
+        }
+        .brand-wrap .logo-cell,
+        .brand-wrap .text-cell {
+            display: table-cell;
+            vertical-align: middle;
+        }
+        .brand-wrap .logo-cell {
+            padding-right: 12px;
+        }
+        .logo {
+            width: 56px;
+            height: 56px;
+            border-radius: 14px;
+            display: block;
+            object-fit: cover;
+        }
         .brand {
             font-size: 22px;
             font-weight: 700;
             letter-spacing: 0.5px;
             margin: 0;
+            color: #4B2DB8;
         }
         .doc-title {
             margin: 4px 0 0;
@@ -119,8 +138,17 @@
         <table class="meta-row">
             <tr>
                 <td>
-                    <p class="brand">Zumifly</p>
-                    <p class="doc-title">Comprobante de pago</p>
+                    <div class="brand-wrap">
+                        @if (!empty($logoSrc))
+                            <div class="logo-cell">
+                                <img class="logo" src="{{ $logoSrc }}" alt="Zumifly">
+                            </div>
+                        @endif
+                        <div class="text-cell">
+                            <p class="brand">Zumifly</p>
+                            <p class="doc-title">Comprobante de pago</p>
+                        </div>
+                    </div>
                 </td>
                 <td class="right">
                     <span class="badge">Aprobado</span>

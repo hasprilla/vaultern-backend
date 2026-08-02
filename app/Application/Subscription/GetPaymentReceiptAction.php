@@ -61,6 +61,7 @@ final class GetPaymentReceiptAction
 
         try {
             $pdf = Pdf::loadView('receipts.subscription_payment', [
+                'logoSrc' => $this->logoDataUri(),
                 'reference' => $payment->payment_reference,
                 'amount' => $amount,
                 'currency' => $currency,
@@ -94,5 +95,20 @@ final class GetPaymentReceiptAction
             'pdf' => $binary,
             'filename' => "comprobante-zumifly-{$safeRef}.pdf",
         ];
+    }
+
+    private function logoDataUri(): ?string
+    {
+        $path = public_path('images/zumifly-logo.png');
+        if (! is_file($path) || ! is_readable($path)) {
+            return null;
+        }
+
+        $bytes = file_get_contents($path);
+        if ($bytes === false || $bytes === '') {
+            return null;
+        }
+
+        return 'data:image/png;base64,'.base64_encode($bytes);
     }
 }
