@@ -10,6 +10,8 @@ use App\Application\Finance\Actions\DeleteBudgetAction;
 use App\Application\Finance\Actions\DeleteTransactionAction;
 use App\Application\Finance\Actions\UpdateBudgetAction;
 use App\Application\Finance\Actions\UpdateTransactionAction;
+use App\Application\Finance\Queries\GetFinanceReportQuery;
+use App\Application\Finance\Queries\ListTransactionsQuery;
 use App\Domains\Finance\Entities\FinanceReportPeriod;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Concerns\ResolvesPagination;
@@ -32,6 +34,8 @@ class FinanceController extends Controller
 
     public function __construct(
         private readonly ChildGuardianService $guardians,
+        private readonly ListTransactionsQuery $listTransactions,
+        private readonly GetFinanceReportQuery $getFinanceReport,
         private readonly CreateTransactionAction $createTransaction,
         private readonly UpdateTransactionAction $updateTransaction,
         private readonly DeleteTransactionAction $deleteTransaction,
@@ -46,17 +50,12 @@ class FinanceController extends Controller
             return $forbidden;
         }
 
-        $query = $this->transactionsForGuardian($request->user(), $this->guardians)
-            ->with('child')
-            ->orderByDesc('transaction_date');
-
-        if ($request->filled('child_id')) {
-            $childId = $request->integer('child_id');
-            $this->assertCanAccessChild($request->user(), $this->guardians, $childId);
-            $query->where('child_id', $childId);
-        }
-
-        $transactions = $query->paginate($this->perPage($request));
+        $childId = $request->filled('child_id') ? $request->integer('child_id') : null;
+        $transactions = $this->listTransactions->execute(
+            $request->user(),
+            $childId,
+            $this->perPage($request),
+        );
 
         return response()->json($transactions);
     }
@@ -230,30 +229,10 @@ class FinanceController extends Controller
             return $forbidden;
         }
 
-        $from = now()->subDays($period->days())->startOfDay();
-        $base = $this->transactionsForGuardian($request->user(), $this->guardians)
-            ->where('transaction_date', '>=', $from);
-
-        if ($request->filled('child_id')) {
-            $childId = $request->integer('child_id');
-            $this->assertCanAccessChild($request->user(), $this->guardians, $childId);
-            $base->where('child_id', $childId);
-        }
-
-        $income = (clone $base)->where('type', 'income')->sum('amount');
-        $expense = (clone $base)->where('type', 'expense')->sum('amount');
+        $childId = $request->filled('child_id') ? $request->integer('child_id') : null;
 
         return response()->json([
-            'data' => [
-                'period'   => $period->value,
-                'label'    => $period->label(),
-                'income'   => (float) $income,
-                'expense'  => (float) $expense,
-                'balance'  => (float) $income - (float) $expense,
-                'from'     => $from->toDateString(),
-                'to'       => now()->toDateString(),
-                'child_id' => $request->filled('child_id') ? (string) $request->integer('child_id') : null,
-            ],
+            'data' => $this->getFinanceReport->execute($request->user(), $period, $childId),
         ]);
     }
 }

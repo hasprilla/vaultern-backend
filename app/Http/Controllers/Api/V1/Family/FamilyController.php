@@ -14,6 +14,8 @@ use App\Application\Family\Actions\RegisterChildAction;
 use App\Application\Family\Actions\RejectJoinRequestAction;
 use App\Application\Family\Actions\SyncChildGuardiansAction;
 use App\Application\Family\Actions\UpdateFamilyAction;
+use App\Application\Family\Queries\GetFamilyDetailsQuery;
+use App\Application\Family\Queries\ListPendingJoinRequestsQuery;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\Family\CreateFamilyRequest;
 use App\Http\Requests\Api\V1\Family\InviteMemberRequest;
@@ -21,17 +23,15 @@ use App\Http\Requests\Api\V1\Family\RegisterChildRequest;
 use App\Http\Resources\Api\V1\UserResource;
 use App\Models\Family;
 use App\Models\FamilyJoinRequest;
-use App\Models\FamilyMember;
 use App\Models\User;
-use App\Services\ChildGuardianService;
-use App\Support\SchemaCompat;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class FamilyController extends Controller
 {
     public function __construct(
-        private readonly ChildGuardianService $guardians,
+        private readonly GetFamilyDetailsQuery $getFamilyDetails,
+        private readonly ListPendingJoinRequestsQuery $listPendingJoinRequests,
         private readonly RegisterChildAction $registerChildAction,
         private readonly CreateFamilyAction $createFamily,
         private readonly InviteMemberAction $inviteMember,
@@ -46,67 +46,8 @@ class FamilyController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $viewer = $request->user();
-        $family = Family::query()->findOrFail($viewer->family_id);
-        $isOwner = $family->isOwnedBy($viewer);
-
-        $with = SchemaCompat::hasTable('child_guardians')
-            ? ['user.guardians']
-            : ['user'];
-
-        $membersQuery = FamilyMember::query()
-            ->with($with)
-            ->where('family_id', $family->id);
-
-        if ($isOwner) {
-            // El dueño ve activos + padres/madres desactivados (para poder reactivarlos).
-            $membersQuery->where(function ($query) {
-                $query->where('status', 'active')
-                    ->orWhere(function ($inactive) {
-                        $inactive->where('status', 'inactive')
-                            ->whereIn('role', ['padre', 'madre']);
-                    });
-            });
-        } else {
-            $membersQuery->where('status', 'active');
-        }
-
-        $members = $membersQuery->get();
-
-        $myChildIds = $this->guardians->childIdsFor($viewer);
-
-        // Padres/madres solo ven hijos de los que son custodios; adultos siempre visibles.
-        $visible = $members->filter(function (FamilyMember $m) use ($viewer, $myChildIds) {
-            $user = $m->user;
-            if ($user === null) {
-                return false;
-            }
-            if ($user->role !== 'hijo') {
-                return true;
-            }
-            if (! in_array($viewer->role, ['padre', 'madre', 'tutor'], true)) {
-                return true;
-            }
-
-            return in_array((int) $user->id, $myChildIds, true);
-        });
-
         return response()->json([
-            'data' => [
-                'id'             => $family->id,
-                'name'           => $family->name,
-                'plan'           => $family->plan,
-                'invite_code'    => $family->invite_code,
-                'owner_user_id'  => $family->owner_user_id !== null ? (string) $family->owner_user_id : null,
-                'is_owner'       => $isOwner,
-                'members'        => $visible->values()->map(function (FamilyMember $m) {
-                    $payload = (new UserResource($m->user))->resolve();
-                    $payload['membership_status'] = $m->status;
-
-                    return $payload;
-                }),
-                'my_child_ids'   => array_map('strval', $myChildIds),
-            ],
+            'data' => $this->getFamilyDetails->execute($request->user()),
         ]);
     }
 
@@ -253,22 +194,8 @@ class FamilyController extends Controller
             return response()->json(['message' => 'Forbidden'], 403);
         }
 
-        $requests = FamilyJoinRequest::query()
-            ->where('family_id', $family)
-            ->where('status', 'pending')
-            ->orderByDesc('created_at')
-            ->get();
-
         return response()->json([
-            'data' => $requests->map(fn (FamilyJoinRequest $r) => [
-                'id'                 => $r->id,
-                'name'               => $r->name,
-                'email'              => $r->email,
-                'role'               => $r->role,
-                'status'             => $r->status,
-                'invited_by_user_id' => $r->invited_by_user_id,
-                'created_at'         => $r->created_at?->toIso8601String(),
-            ]),
+            'data' => $this->listPendingJoinRequests->execute($family),
         ]);
     }
 

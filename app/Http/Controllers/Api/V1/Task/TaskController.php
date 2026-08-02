@@ -9,6 +9,7 @@ use App\Application\Task\Actions\CompleteTaskAction;
 use App\Application\Task\Actions\CreateTaskAction;
 use App\Application\Task\Actions\DeleteTaskAction;
 use App\Application\Task\Actions\UpdateTaskAction;
+use App\Application\Task\Queries\ListTasksQuery;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Concerns\ResolvesPagination;
 use App\Http\Controllers\Concerns\ReturnsForbidden;
@@ -23,6 +24,7 @@ class TaskController extends Controller
     use ReturnsForbidden;
 
     public function __construct(
+        private readonly ListTasksQuery $listTasks,
         private readonly CreateTaskAction $createTask,
         private readonly UpdateTaskAction $updateTask,
         private readonly CompleteTaskAction $completeTask,
@@ -32,40 +34,13 @@ class TaskController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $query = Task::query()->with(['creator', 'assignee']);
-
-        if ($request->filled('assigned_to')) {
-            $query->where('assigned_to', $request->input('assigned_to'));
-        }
-
-        if ($request->filled('status')) {
-            $status = $request->input('status');
-
-            if ($status === 'overdue') {
-                $query->where('status', '!=', 'done')
-                    ->where(function ($builder) {
-                        $builder->where('status', 'overdue')
-                            ->orWhere(function ($nested) {
-                                $nested->whereNotNull('due_date')
-                                    ->whereDate('due_date', '<', now());
-                            });
-                    });
-            } elseif ($status === 'pending') {
-                $query->where('status', 'pending')
-                    ->where(function ($builder) {
-                        $builder->whereNull('due_date')
-                            ->orWhereDate('due_date', '>=', now()->toDateString());
-                    });
-            } else {
-                $query->where('status', $status);
-            }
-        }
-
-        if ($request->input('status') === 'overdue') {
-            $tasks = $query->orderBy('due_date')->paginate($this->perPage($request));
-        } else {
-            $tasks = $query->orderByDesc('created_at')->paginate($this->perPage($request));
-        }
+        $tasks = $this->listTasks->execute(
+            [
+                'assigned_to' => $request->input('assigned_to'),
+                'status' => $request->input('status'),
+            ],
+            $this->perPage($request),
+        );
 
         return response()->json($tasks);
     }
