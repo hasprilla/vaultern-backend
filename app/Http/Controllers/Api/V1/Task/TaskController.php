@@ -126,6 +126,13 @@ class TaskController extends Controller
             return $forbidden;
         }
 
+        if ($model->status !== 'pending') {
+            return response()->json([
+                'message' => 'Solo se pueden agregar adjuntos mientras la tarea está pendiente.',
+                'code' => 'task_attachments_locked',
+            ], 422);
+        }
+
         $request->validate([
             'attachments' => ['required', 'array', 'min:1', 'max:5'],
             'attachments.*' => ['file', 'mimes:jpeg,jpg,png,webp,pdf', 'max:10240'],
@@ -150,6 +157,13 @@ class TaskController extends Controller
 
         if ($forbidden = $this->forbidUnlessAuthorized('update', $model)) {
             return $forbidden;
+        }
+
+        if ($model->status !== 'pending') {
+            return response()->json([
+                'message' => 'Solo se pueden eliminar adjuntos mientras la tarea está pendiente.',
+                'code' => 'task_attachments_locked',
+            ], 422);
         }
 
         $file = $model->attachments()->whereKey($attachment)->firstOrFail();

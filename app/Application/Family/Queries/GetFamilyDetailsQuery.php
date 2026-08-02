@@ -43,11 +43,12 @@ final class GetFamilyDetailsQuery
             ->where('family_id', $family->id);
 
         if ($isOwner) {
+            // Activos de cualquier rol + inactivos del núcleo (para reactivar).
             $membersQuery->where(function ($query) {
                 $query->where('status', 'active')
                     ->orWhere(function ($inactive) {
                         $inactive->where('status', 'inactive')
-                            ->whereIn('role', ['padre', 'madre']);
+                            ->whereIn('role', ['padre', 'madre', 'tutor', 'hijo']);
                     });
             });
         } else {

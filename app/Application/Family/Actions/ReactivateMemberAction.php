@@ -27,7 +27,7 @@ final class ReactivateMemberAction
             return [
                 'ok' => false,
                 'status' => 403,
-                'message' => 'Solo el dueño de la membresía puede reactivar a un padre o madre.',
+                'message' => 'Solo el dueño de la membresía puede reactivar a un miembro.',
             ];
         }
 
@@ -36,11 +36,11 @@ final class ReactivateMemberAction
             ->where('user_id', $memberId)
             ->firstOrFail();
 
-        if (! in_array($membership->role, ['padre', 'madre'], true)) {
+        if (! in_array($membership->role, ['padre', 'madre', 'tutor', 'hijo'], true)) {
             return [
                 'ok' => false,
                 'status' => 422,
-                'message' => 'Solo se puede reactivar a un padre o una madre.',
+                'message' => 'Este tipo de miembro no se puede reactivar desde aquí.',
             ];
         }
 

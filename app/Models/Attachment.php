@@ -56,7 +56,22 @@ class Attachment extends Model
 
     public function isImage(): bool
     {
-        return str_starts_with((string) $this->mime_type, 'image/');
+        $mime = (string) $this->mime_type;
+        if (str_starts_with($mime, 'image/')) {
+            return true;
+        }
+
+        if ($mime === 'application/pdf') {
+            return false;
+        }
+
+        if (in_array((string) $this->kind, ['image', 'receipt'], true)) {
+            return true;
+        }
+
+        $ext = strtolower((string) pathinfo((string) $this->original_name, PATHINFO_EXTENSION));
+
+        return in_array($ext, ['jpg', 'jpeg', 'png', 'webp', 'gif'], true);
     }
 
     public function url(?Request $request = null): string

@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Tests\Feature\Api\V1\Task;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Tests\Concerns\AuthenticatesUsers;
 use Tests\TestCase;
 
@@ -129,5 +131,65 @@ class TaskApiTest extends TestCase
         $this->assertContains('Pendiente al día', $titles);
         $this->assertContains('Pendiente sin fecha', $titles);
         $this->assertNotContains('Pendiente vencida', $titles);
+    }
+
+    public function test_can_create_task_with_image_attachments_marked_as_images(): void
+    {
+        Storage::fake('public');
+        ['tokens' => $tokens] = $this->createUserWithFamily();
+
+        $this->post('/api/v1/tasks', [
+            'title' => 'Tarea con fotos',
+            'attachments' => [
+                UploadedFile::fake()->image('foto1.jpg'),
+                UploadedFile::fake()->image('foto2.png'),
+            ],
+        ], $this->authHeaders($tokens))
+            ->assertCreated()
+            ->assertJsonPath('data.attachments.0.is_image', true)
+            ->assertJsonPath('data.attachments.1.is_image', true)
+            ->assertJsonPath('data.attachments.0.kind', 'image');
+    }
+
+    public function test_owner_can_delete_attachment_only_while_pending(): void
+    {
+        Storage::fake('public');
+        ['tokens' => $tokens] = $this->createUserWithFamily();
+
+        $create = $this->post('/api/v1/tasks', [
+            'title' => 'Tarea adjuntos',
+            'attachments' => [UploadedFile::fake()->image('a.jpg')],
+        ], $this->authHeaders($tokens))->assertCreated();
+
+        $taskId = $create->json('data.id');
+        $attachmentId = $create->json('data.attachments.0.id');
+
+        $this->deleteJson(
+            "/api/v1/tasks/{$taskId}/attachments/{$attachmentId}",
+            [],
+            $this->authHeaders($tokens),
+        )->assertOk();
+
+        $create2 = $this->post('/api/v1/tasks', [
+            'title' => 'Tarea bloqueada',
+            'attachments' => [UploadedFile::fake()->image('b.jpg')],
+        ], $this->authHeaders($tokens))->assertCreated();
+
+        $taskId2 = $create2->json('data.id');
+        $attachmentId2 = $create2->json('data.attachments.0.id');
+
+        $this->patchJson(
+            "/api/v1/tasks/{$taskId2}",
+            ['status' => 'in_progress'],
+            $this->authHeaders($tokens),
+        )->assertOk();
+
+        $this->deleteJson(
+            "/api/v1/tasks/{$taskId2}/attachments/{$attachmentId2}",
+            [],
+            $this->authHeaders($tokens),
+        )
+            ->assertStatus(422)
+            ->assertJsonPath('code', 'task_attachments_locked');
     }
 }

@@ -32,6 +32,8 @@ class ParentMessageController extends Controller
             ->orderByDesc('created_at')
             ->paginate(30);
 
+        $messages->getCollection()->transform(fn (ParentMessage $m) => $this->messagePayload($m));
+
         return response()->json($messages);
     }
 
@@ -50,7 +52,26 @@ class ParentMessageController extends Controller
             return response()->json(['message' => $result['message']], $result['status']);
         }
 
-        return response()->json(['data' => $result['message']], 201);
+        return response()->json(['data' => $this->messagePayload($result['message'])], 201);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function messagePayload(ParentMessage $message): array
+    {
+        return [
+            'id' => (string) $message->id,
+            'message' => (string) $message->message,
+            'priority' => (string) $message->priority,
+            'read' => (bool) $message->read,
+            'sender' => $message->sender === null ? null : [
+                'id' => $message->sender->id,
+                'name' => $message->sender->name,
+                'role' => $message->sender->role,
+            ],
+            'created_at' => $message->created_at?->toIso8601String(),
+        ];
     }
 
     public function markRead(Request $request, string $family, string $message): JsonResponse

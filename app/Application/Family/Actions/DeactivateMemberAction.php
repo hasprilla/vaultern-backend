@@ -31,7 +31,7 @@ final class DeactivateMemberAction
             return [
                 'ok' => false,
                 'status' => 403,
-                'message' => 'Solo el dueño de la membresía puede desactivar a un padre o madre.',
+                'message' => 'Solo el dueño de la membresía puede desactivar a un miembro.',
             ];
         }
 
@@ -40,11 +40,12 @@ final class DeactivateMemberAction
             ->where('user_id', $memberId)
             ->firstOrFail();
 
-        if (! in_array($membership->role, ['padre', 'madre'], true)) {
+        // Solo roles del núcleo familiar (no soporte / personal escolar).
+        if (! in_array($membership->role, ['padre', 'madre', 'tutor', 'hijo'], true)) {
             return [
                 'ok' => false,
                 'status' => 422,
-                'message' => 'Solo se puede desactivar a un padre o una madre.',
+                'message' => 'Este tipo de miembro no se puede desactivar desde aquí.',
             ];
         }
 

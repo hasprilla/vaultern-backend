@@ -49,7 +49,7 @@ final class StoreAttachmentsAction
                 continue;
             }
 
-            $mime = (string) ($file->getMimeType() ?: $file->getClientMimeType());
+            $mime = $this->resolveMime($file);
             $kind = $this->resolveKind($mime, $defaultKind);
             $path = $file->store(
                 "attachments/{$familyId}/{$folder}/{$owner->getKey()}",
@@ -72,6 +72,28 @@ final class StoreAttachmentsAction
         }
 
         return $stored;
+    }
+
+    private function resolveMime(UploadedFile $file): string
+    {
+        $detected = (string) ($file->getMimeType() ?: '');
+        if ($detected !== '' && $detected !== 'application/octet-stream') {
+            return $detected;
+        }
+
+        $client = (string) ($file->getClientMimeType() ?: '');
+        if ($client !== '' && $client !== 'application/octet-stream') {
+            return $client;
+        }
+
+        return match (strtolower($file->getClientOriginalExtension())) {
+            'jpg', 'jpeg' => 'image/jpeg',
+            'png' => 'image/png',
+            'webp' => 'image/webp',
+            'gif' => 'image/gif',
+            'pdf' => 'application/pdf',
+            default => $detected !== '' ? $detected : 'application/octet-stream',
+        };
     }
 
     private function resolveKind(string $mime, string $defaultKind): string

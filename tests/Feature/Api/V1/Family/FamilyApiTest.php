@@ -61,6 +61,37 @@ class FamilyApiTest extends TestCase
             ->assertJsonPath('data.name', 'Lucía Test');
     }
 
+    public function test_register_child_requires_mother_when_mothers_exist(): void
+    {
+        ['user' => $owner, 'family' => $family, 'tokens' => $tokens] = $this->createUserWithFamily();
+
+        $mother = User::factory()->create([
+            'family_id' => $family->id,
+            'role' => 'madre',
+            'email' => 'madre.custodia@yopmail.com',
+        ]);
+        FamilyMember::query()->create([
+            'id' => (string) Str::uuid(),
+            'family_id' => $family->id,
+            'user_id' => $mother->id,
+            'role' => 'madre',
+            'status' => 'active',
+        ]);
+
+        $this->postJson("/api/v1/families/{$family->id}/children", [
+            'name' => 'Sin mamá asignada',
+        ], $this->authHeaders($tokens))
+            ->assertStatus(422)
+            ->assertJsonPath('code', 'mother_required');
+
+        $this->postJson("/api/v1/families/{$family->id}/children", [
+            'name' => 'Con mamá',
+            'guardian_ids' => [(int) $mother->id],
+        ], $this->authHeaders($tokens))
+            ->assertCreated()
+            ->assertJsonPath('data.name', 'Con mamá');
+    }
+
     public function test_parent_can_approve_pending_join_request(): void
     {
         ['user' => $parent, 'family' => $family, 'tokens' => $tokens] = $this->createUserWithFamily();
@@ -248,5 +279,59 @@ class FamilyApiTest extends TestCase
             [],
             $this->authHeaders($partnerTokens),
         )->assertForbidden();
+    }
+
+    public function test_owner_can_deactivate_tutor_and_child(): void
+    {
+        ['user' => $owner, 'family' => $family, 'tokens' => $ownerTokens] = $this->createUserWithFamily();
+
+        $tutor = User::factory()->create([
+            'family_id' => $family->id,
+            'role' => 'tutor',
+            'email' => 'tutor.desactivar@yopmail.com',
+        ]);
+        FamilyMember::query()->create([
+            'id' => (string) Str::uuid(),
+            'family_id' => $family->id,
+            'user_id' => $tutor->id,
+            'role' => 'tutor',
+            'status' => 'active',
+        ]);
+
+        $child = User::factory()->create([
+            'family_id' => $family->id,
+            'role' => 'hijo',
+            'email' => 'hijo.desactivar@yopmail.com',
+        ]);
+        FamilyMember::query()->create([
+            'id' => (string) Str::uuid(),
+            'family_id' => $family->id,
+            'user_id' => $child->id,
+            'role' => 'hijo',
+            'status' => 'active',
+        ]);
+
+        $this->postJson(
+            "/api/v1/families/{$family->id}/members/{$tutor->id}/deactivate",
+            [],
+            $this->authHeaders($ownerTokens),
+        )
+            ->assertOk()
+            ->assertJsonPath('data.membership_status', 'inactive');
+
+        $this->postJson(
+            "/api/v1/families/{$family->id}/members/{$child->id}/deactivate",
+            [],
+            $this->authHeaders($ownerTokens),
+        )
+            ->assertOk()
+            ->assertJsonPath('data.membership_status', 'inactive');
+
+        $this->postJson('/api/v1/auth/login', [
+            'email' => 'tutor.desactivar@yopmail.com',
+            'password' => 'password',
+        ])
+            ->assertForbidden()
+            ->assertJsonPath('code', 'family_membership_inactive');
     }
 }
