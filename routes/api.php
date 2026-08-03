@@ -139,6 +139,7 @@ Route::prefix('v1')->middleware(['api.auth', 'device.recovery', 'tenant'])->grou
     Route::get('/rewards/summary', [RewardsController::class, 'summary']);
 
     Route::get('/dashboard/analytics', [DashboardController::class, 'analytics']);
+    Route::get('/dashboard/task-daily-stats', [DashboardController::class, 'taskDailyStats']);
 
     Route::get('/notifications', [NotificationController::class, 'index']);
     Route::post('/notifications', [NotificationController::class, 'store']);
