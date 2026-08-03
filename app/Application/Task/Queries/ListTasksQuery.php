@@ -16,7 +16,7 @@ final class ListTasksQuery
     ) {}
 
     /**
-     * @param  array{assigned_to?: string|null, status?: string|null, q?: string|null}  $filters
+     * @param  array{assigned_to?: string|null, status?: string|null, q?: string|null, date_from?: string|null, date_to?: string|null}  $filters
      */
     public function execute(User $viewer, array $filters, int $perPage): LengthAwarePaginator
     {
@@ -34,6 +34,15 @@ final class ListTasksQuery
                 $builder->where('title', 'like', $like)
                     ->orWhere('description', 'like', $like);
             });
+        }
+
+        $from = $filters['date_from'] ?? null;
+        $to = $filters['date_to'] ?? null;
+        if (is_string($from) && $from !== '') {
+            $query->whereDate('created_at', '>=', $from);
+        }
+        if (is_string($to) && $to !== '') {
+            $query->whereDate('created_at', '<=', $to);
         }
 
         $status = $filters['status'] ?? null;

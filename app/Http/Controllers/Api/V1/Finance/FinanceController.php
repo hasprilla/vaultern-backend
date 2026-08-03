@@ -64,6 +64,8 @@ class FinanceController extends Controller
                 'child_id' => $request->filled('child_id') ? $request->integer('child_id') : null,
                 'type' => $request->input('type'),
                 'q' => $request->input('q'),
+                'date_from' => $request->input('date_from'),
+                'date_to' => $request->input('date_to'),
             ],
             $this->perPage($request),
         );

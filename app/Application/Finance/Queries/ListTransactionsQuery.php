@@ -18,7 +18,7 @@ final class ListTransactionsQuery
     ) {}
 
     /**
-     * @param  array{child_id?: int|null, type?: string|null, q?: string|null}  $filters
+     * @param  array{child_id?: int|null, type?: string|null, q?: string|null, date_from?: string|null, date_to?: string|null}  $filters
      */
     public function execute(User $viewer, array $filters, int $perPage): LengthAwarePaginator
     {
@@ -44,6 +44,15 @@ final class ListTransactionsQuery
                 $builder->where('description', 'like', $like)
                     ->orWhere('category', 'like', $like);
             });
+        }
+
+        $from = $filters['date_from'] ?? null;
+        $to = $filters['date_to'] ?? null;
+        if (is_string($from) && $from !== '') {
+            $query->whereDate('transaction_date', '>=', $from);
+        }
+        if (is_string($to) && $to !== '') {
+            $query->whereDate('transaction_date', '<=', $to);
         }
 
         return $query->paginate($perPage);

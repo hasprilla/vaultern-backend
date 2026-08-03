@@ -25,7 +25,16 @@ class DashboardApiTest extends TestCase
         $this->getJson('/api/v1/dashboard/analytics?period=weekly', $this->authHeaders($tokens))
             ->assertOk()
             ->assertJsonStructure([
-                'data' => ['period', 'tasks_total', 'tasks_done', 'tasks_overdue', 'completion_rate'],
+                'data' => [
+                    'period',
+                    'tasks_total',
+                    'tasks_done',
+                    'tasks_overdue',
+                    'completion_rate',
+                    'total_expenses',
+                    'total_income',
+                    'completed_by_day',
+                ],
             ]);
     }
 }
