@@ -48,10 +48,8 @@ class UserResource extends JsonResource
             return null;
         }
 
-        if (str_starts_with($avatar, 'http://') || str_starts_with($avatar, 'https://')) {
-            return $avatar;
-        }
-
-        return $request->getSchemeAndHttpHost().'/storage/'.ltrim($avatar, '/');
+        // Servir siempre por API autenticada: evita 404 si falta symlink public/storage
+        // o si el archivo no es accesible como estático en el hosting.
+        return $request->getSchemeAndHttpHost().'/api/v1/users/'.$this->id.'/avatar';
     }
 }

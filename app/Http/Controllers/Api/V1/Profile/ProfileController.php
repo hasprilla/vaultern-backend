@@ -30,6 +30,8 @@ use App\Services\PlanFeatureService;
 use App\Support\NotificationPreferences;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ProfileController extends Controller
 {
@@ -72,6 +74,40 @@ class ProfileController extends Controller
         return response()->json([
             'message' => 'Foto de perfil actualizada.',
             'data' => new UserResource($result['user']),
+        ]);
+    }
+
+    /**
+     * Sirve el avatar desde el disco `public` (no depende del symlink web).
+     */
+    public function showAvatar(Request $request, string $user): StreamedResponse|JsonResponse
+    {
+        $actor = $request->user();
+        $model = User::query()->findOrFail($user);
+
+        $sameFamily = $actor->family_id !== null
+            && $model->family_id !== null
+            && (string) $actor->family_id === (string) $model->family_id;
+
+        if ((string) $actor->id !== (string) $model->id && ! $sameFamily) {
+            return response()->json(['message' => 'No autorizado.'], 403);
+        }
+
+        $path = $model->avatar;
+        if ($path === null || $path === '') {
+            return response()->json(['message' => 'Sin foto de perfil.'], 404);
+        }
+
+        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+            return response()->json(['message' => 'Avatar externo no soportado aquí.'], 404);
+        }
+
+        if (! Storage::disk('public')->exists($path)) {
+            return response()->json(['message' => 'Archivo de avatar no encontrado.'], 404);
+        }
+
+        return Storage::disk('public')->response($path, null, [
+            'Cache-Control' => 'private, max-age=3600',
         ]);
     }
 

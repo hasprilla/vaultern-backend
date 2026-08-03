@@ -67,6 +67,7 @@ Route::prefix('v1')->middleware(['api.auth', 'device.recovery', 'tenant'])->grou
 
     Route::patch('/profile', [ProfileController::class, 'update']);
     Route::post('/profile/avatar', [ProfileController::class, 'updateAvatar']);
+    Route::get('/users/{user}/avatar', [ProfileController::class, 'showAvatar']);
     Route::post('/profile/password', [ProfileController::class, 'changePassword']);
     Route::post('/profile/fcm-token', [ProfileController::class, 'updateFcmToken']);
     Route::get('/profile/plan-usage', [ProfileController::class, 'planUsage']);
