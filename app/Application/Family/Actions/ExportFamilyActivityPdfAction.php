@@ -47,7 +47,7 @@ final class ExportFamilyActivityPdfAction
         $expenses = (float) Transaction::query()
             ->where('family_id', $family->id)
             ->where('type', 'expense')
-            ->whereBetween('occurred_at', [$start, $end])
+            ->whereBetween('transaction_date', [$start, $end])
             ->sum('amount');
 
         $schoolTasks = Task::query()
@@ -55,6 +55,22 @@ final class ExportFamilyActivityPdfAction
             ->where('is_school', true)
             ->whereBetween('created_at', [$start, $end])
             ->count();
+
+        $recentCompletedTasks = Task::query()
+            ->where('family_id', $family->id)
+            ->where('status', 'done')
+            ->whereBetween('completed_at', [$start, $end])
+            ->orderByDesc('completed_at')
+            ->limit(15)
+            ->get(['title', 'completed_at']);
+
+        $recentExpenses = Transaction::query()
+            ->where('family_id', $family->id)
+            ->where('type', 'expense')
+            ->whereBetween('transaction_date', [$start, $end])
+            ->orderByDesc('transaction_date')
+            ->limit(15)
+            ->get(['description', 'category', 'amount', 'transaction_date']);
 
         try {
             $pdf = Pdf::loadView('exports.family_activity', [
@@ -67,6 +83,8 @@ final class ExportFamilyActivityPdfAction
                 'tasksPending' => $tasksPending,
                 'expenses' => $expenses,
                 'schoolTasks' => $schoolTasks,
+                'recentCompletedTasks' => $recentCompletedTasks,
+                'recentExpenses' => $recentExpenses,
                 'generatedAt' => now(),
             ])->output();
         } catch (\Throwable $e) {
