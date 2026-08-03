@@ -22,15 +22,40 @@ class NotificationController extends Controller
     public function index(Request $request): JsonResponse
     {
         $perPage = $this->perPage($request, 30);
+        $userId = $request->user()->id;
 
-        $notifications = AppNotification::query()
-            ->where('user_id', $request->user()->id)
-            ->orderByDesc('created_at')
-            ->paginate($perPage);
+        $query = AppNotification::query()
+            ->where('user_id', $userId)
+            ->orderByDesc('created_at');
+
+        if ($request->boolean('unread')) {
+            $query->where('read', false);
+        }
+
+        $category = $request->input('category');
+        if (is_string($category) && $category !== '' && $category !== 'all') {
+            $prefixes = match ($category) {
+                'tasks' => ['task_'],
+                'finance' => ['finance_', 'transaction_', 'budget_'],
+                'family' => ['family_', 'join_'],
+                'school' => ['school_', 'ocr_'],
+                default => [],
+            };
+
+            if ($prefixes !== []) {
+                $query->where(function ($builder) use ($prefixes) {
+                    foreach ($prefixes as $prefix) {
+                        $builder->orWhere('type', 'like', $prefix.'%');
+                    }
+                });
+            }
+        }
+
+        $notifications = $query->paginate($perPage);
 
         $payload = $notifications->toArray();
         $payload['unread_count'] = AppNotification::query()
-            ->where('user_id', $request->user()->id)
+            ->where('user_id', $userId)
             ->where('read', false)
             ->count();
 

@@ -9,6 +9,7 @@ use App\Models\OcrJob;
 use App\Models\User;
 use App\Services\FamilyNotificationService;
 use App\Services\Ocr\GoogleVisionOcrService;
+use App\Services\Ocr\LlmOcrCopilotService;
 use App\Services\PlanFeatureService;
 use App\Support\FamilyRealtime;
 
@@ -22,6 +23,7 @@ final class ProcessOcrJobAction
         private readonly FamilyNotificationService $notifications,
         private readonly PlanFeatureService $planFeatures,
         private readonly GoogleVisionOcrService $vision,
+        private readonly LlmOcrCopilotService $llmCopilot,
     ) {}
 
     /**
@@ -60,6 +62,14 @@ final class ProcessOcrJobAction
                 $confidence = $vision['confidence'];
                 $structured = $this->vision->structure($type, $rawText);
             }
+        }
+
+        // Copiloto IA (Gemini/OpenAI): mejora tareas/fechas/montos si hay API key.
+        $enriched = $this->llmCopilot->enrich($type, $rawText);
+        if (is_array($enriched) && $enriched !== []) {
+            $structured = array_merge($structured, $enriched);
+            $structured['copilot'] = filled(config('services.gemini.api_key')) ? 'gemini' : 'openai';
+            $confidence = min(0.98, max($confidence, 0.9));
         }
 
         $job = OcrJob::query()->create([

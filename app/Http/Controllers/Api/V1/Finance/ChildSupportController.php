@@ -359,4 +359,34 @@ class ChildSupportController extends Controller
 
         return response()->json(['data' => new ChildSupportAgreementResource($model)]);
     }
+
+    /** Sube el PDF/foto del acuerdo ya firmado (sin crear uno nuevo). */
+    public function storeAttachments(Request $request, string $agreement): JsonResponse
+    {
+        if ($forbidden = $this->forbidUnlessAuthorized('create', Transaction::class)) {
+            return $forbidden;
+        }
+
+        $model = ChildSupportAgreement::query()
+            ->where('family_id', $request->user()->family_id)
+            ->findOrFail($agreement);
+
+        $request->validate([
+            'attachments' => ['required', 'array', 'min:1', 'max:5'],
+            'attachments.*' => ['file', 'mimes:jpeg,jpg,png,webp,pdf', 'max:10240'],
+        ]);
+
+        $files = $request->file('attachments', []);
+        $this->storeAttachmentsAction->execute(
+            $request->user(),
+            $model,
+            is_array($files) ? $files : [],
+            'child-support/'.(string) $model->id,
+            'agreement',
+        );
+
+        $model->load(['child', 'payer', 'beneficiary', 'adjustments', 'attachments', 'payments.attachments']);
+
+        return response()->json(['data' => new ChildSupportAgreementResource($model)]);
+    }
 }

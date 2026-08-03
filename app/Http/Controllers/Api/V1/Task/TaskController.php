@@ -43,6 +43,7 @@ class TaskController extends Controller
             [
                 'assigned_to' => $request->input('assigned_to'),
                 'status' => $request->input('status'),
+                'q' => $request->input('q'),
             ],
             $this->perPage($request),
         );

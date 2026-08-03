@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\V1\Auth\AuthController;
 use App\Http\Controllers\Api\V1\Auth\MfaController;
 use App\Http\Controllers\Api\V1\Dashboard\DashboardController;
 use App\Http\Controllers\Api\V1\Family\FamilyController;
+use App\Http\Controllers\Api\V1\Rewards\RewardsController;
 use App\Http\Controllers\Api\V1\Family\ParentMessageController;
 use App\Http\Controllers\Api\V1\Finance\ChildSupportController;
 use App\Http\Controllers\Api\V1\Finance\FinanceController;
@@ -77,6 +78,8 @@ Route::prefix('v1')->middleware(['api.auth', 'device.recovery', 'tenant'])->grou
     Route::post('/profile/account/deactivate', [ProfileController::class, 'deactivate']);
     Route::delete('/profile/account', [ProfileController::class, 'destroy']);
 
+    Route::get('/families/memberships', [FamilyController::class, 'memberships']);
+    Route::get('/families/activity-export', [FamilyController::class, 'activityExport']);
     Route::apiResource('families', FamilyController::class);
     Route::post('/families/{family}/invite', [FamilyController::class, 'invite']);
     Route::post('/families/{family}/children', [FamilyController::class, 'registerChild']);
@@ -131,6 +134,9 @@ Route::prefix('v1')->middleware(['api.auth', 'device.recovery', 'tenant'])->grou
     Route::post('/finance/child-support/{agreement}/adjustments', [ChildSupportController::class, 'storeAdjustment']);
     Route::post('/finance/child-support/{agreement}/payments', [ChildSupportController::class, 'storePayment']);
     Route::post('/finance/child-support/{agreement}/end', [ChildSupportController::class, 'end']);
+    Route::post('/finance/child-support/{agreement}/attachments', [ChildSupportController::class, 'storeAttachments']);
+
+    Route::get('/rewards/summary', [RewardsController::class, 'summary']);
 
     Route::get('/dashboard/analytics', [DashboardController::class, 'analytics']);
 

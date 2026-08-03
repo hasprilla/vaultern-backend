@@ -14,6 +14,7 @@ use App\Application\Family\Actions\RegisterChildAction;
 use App\Application\Family\Actions\RejectJoinRequestAction;
 use App\Application\Family\Actions\SyncChildGuardiansAction;
 use App\Application\Family\Actions\SyncParentChildAccessAction;
+use App\Application\Family\Actions\ExportFamilyActivityPdfAction;
 use App\Application\Family\Actions\UpdateFamilyAction;
 use App\Application\Family\Actions\UpdateMemberAccessAction;
 use App\Application\Family\Queries\GetFamilyDetailsQuery;
@@ -25,9 +26,11 @@ use App\Http\Requests\Api\V1\Family\RegisterChildRequest;
 use App\Http\Resources\Api\V1\UserResource;
 use App\Models\Family;
 use App\Models\FamilyJoinRequest;
+use App\Models\FamilyMember;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\Response;
 
 class FamilyController extends Controller
 {
@@ -46,12 +49,68 @@ class FamilyController extends Controller
         private readonly UpdateMemberAccessAction $updateMemberAccessAction,
         private readonly DeactivateMemberAction $deactivateMemberAction,
         private readonly ReactivateMemberAction $reactivateMemberAction,
+        private readonly ExportFamilyActivityPdfAction $exportFamilyActivityPdfAction,
     ) {}
 
     public function index(Request $request): JsonResponse
     {
         return response()->json([
             'data' => $this->getFamilyDetails->execute($request->user()),
+        ]);
+    }
+
+    /**
+     * Núcleos donde el usuario es miembro (solo lectura / claridad UX).
+     * El switch completo de contexto queda fuera por complejidad.
+     */
+    public function memberships(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $rows = FamilyMember::query()
+            ->where('user_id', $user->id)
+            ->with('family:id,name,plan,owner_user_id')
+            ->orderByDesc('updated_at')
+            ->get()
+            ->map(function (FamilyMember $m) use ($user) {
+                $family = $m->family;
+
+                return [
+                    'family_id' => (string) $m->family_id,
+                    'name' => $family?->name ?? 'Familia',
+                    'plan' => $family?->plan ?? 'free',
+                    'role' => $m->role,
+                    'status' => $m->status,
+                    'is_current' => (string) $user->family_id === (string) $m->family_id,
+                    'is_owner' => $family?->owner_user_id !== null
+                        && (int) $family->owner_user_id === (int) $user->id,
+                ];
+            })
+            ->values()
+            ->all();
+
+        return response()->json([
+            'data' => $rows,
+            'meta' => [
+                'note' => 'Estás trabajando en el núcleo marcado como actual. Si perteneces a varios, el acceso se ajusta automáticamente si te desactivan en uno.',
+            ],
+        ]);
+    }
+
+    public function activityExport(Request $request): Response
+    {
+        $period = $request->query('period', 'weekly');
+        if (! in_array($period, ['weekly', 'monthly'], true)) {
+            $period = 'weekly';
+        }
+
+        $result = $this->exportFamilyActivityPdfAction->execute($request->user(), $period);
+        if (($result['ok'] ?? false) !== true) {
+            return response()->json(['message' => $result['message']], $result['status'] ?? 500);
+        }
+
+        return response($result['pdf'], 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="'.$result['filename'].'"',
         ]);
     }
 

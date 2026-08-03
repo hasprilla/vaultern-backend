@@ -51,6 +51,11 @@ return Application::configure(basePath: dirname(__DIR__))
             ->hourly()
             ->withoutOverlapping(55);
 
+        // Alertas: tareas vencidas y presupuestos al 80%+ (1× al día).
+        $schedule->command('family:smart-alerts')
+            ->dailyAt('08:00')
+            ->withoutOverlapping(30);
+
         // cPanel (QUEUE_CONNECTION=database): cron cada minuto drena jobs y sale.
         // Docker/Railway (redis): el servicio `worker` mantiene queue:work; no hace falta esto.
         if (config('queue.default') === 'database') {

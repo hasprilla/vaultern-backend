@@ -58,10 +58,13 @@ class FinanceController extends Controller
             return $forbidden;
         }
 
-        $childId = $request->filled('child_id') ? $request->integer('child_id') : null;
         $transactions = $this->listTransactions->execute(
             $request->user(),
-            $childId,
+            [
+                'child_id' => $request->filled('child_id') ? $request->integer('child_id') : null,
+                'type' => $request->input('type'),
+                'q' => $request->input('q'),
+            ],
             $this->perPage($request),
         );
 

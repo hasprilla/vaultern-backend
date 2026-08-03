@@ -16,7 +16,7 @@ final class ListTasksQuery
     ) {}
 
     /**
-     * @param  array{assigned_to?: string|null, status?: string|null}  $filters
+     * @param  array{assigned_to?: string|null, status?: string|null, q?: string|null}  $filters
      */
     public function execute(User $viewer, array $filters, int $perPage): LengthAwarePaginator
     {
@@ -27,9 +27,20 @@ final class ListTasksQuery
             $query->where('assigned_to', $filters['assigned_to']);
         }
 
+        $search = trim((string) ($filters['q'] ?? ''));
+        if ($search !== '') {
+            $like = '%'.$search.'%';
+            $query->where(function ($builder) use ($like) {
+                $builder->where('title', 'like', $like)
+                    ->orWhere('description', 'like', $like);
+            });
+        }
+
         $status = $filters['status'] ?? null;
 
-        if ($status === 'overdue') {
+        if ($status === 'school') {
+            $query->where('is_school', true);
+        } elseif ($status === 'overdue') {
             $query->where('status', '!=', 'done')
                 ->where(function ($builder) {
                     $builder->where('status', 'overdue')

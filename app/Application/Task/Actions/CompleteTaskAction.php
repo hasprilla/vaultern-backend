@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\Task\Actions;
 
+use App\Application\Rewards\AwardTaskRewardAction;
 use App\Models\Task;
 use App\Models\User;
 use App\Services\FamilyNotificationService;
@@ -13,6 +14,7 @@ final class CompleteTaskAction
 {
     public function __construct(
         private readonly FamilyNotificationService $notifications,
+        private readonly AwardTaskRewardAction $rewards,
     ) {}
 
     public function execute(User $actor, Task $task): Task
@@ -23,6 +25,8 @@ final class CompleteTaskAction
         ]);
 
         $task = $task->fresh(['creator', 'assignee']);
+
+        $this->rewards->execute($actor, $task);
 
         $this->notifyTaskAudience(
             $actor,
