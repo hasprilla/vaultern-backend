@@ -64,7 +64,9 @@ final class VerifyDeviceChallengeAction
             ];
         }
 
-        if (! $this->challenges->consume($token, $userId)) {
+        // Validar token sin consumirlo: si la clave/respuesta falla, el usuario
+        // puede reintentar sin volver a login. Solo se invalida al éxito.
+        if (! $this->challenges->isValid($token, $userId)) {
             RateLimiter::hit($rateKey, 600);
 
             return [
@@ -104,6 +106,16 @@ final class VerifyDeviceChallengeAction
                 'status' => 403,
                 'message' => 'Clave secreta o respuesta incorrecta.',
                 'code' => 'device_challenge_failed',
+            ];
+        }
+
+        // Solo invalidar el token cuando la identidad es correcta.
+        if (! $this->challenges->consume($token, $userId)) {
+            return [
+                'ok' => false,
+                'status' => 403,
+                'message' => 'El desafío expiró o no es válido. Vuelve a iniciar sesión.',
+                'code' => 'challenge_expired',
             ];
         }
 
