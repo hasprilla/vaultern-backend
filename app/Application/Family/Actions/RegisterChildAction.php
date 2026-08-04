@@ -26,11 +26,13 @@ final class RegisterChildAction
     ) {}
 
     /**
-     * @param  array{name: string, guardian_ids?: array<int>|null}  $validated
+     * @param  array{name: string, guardian_ids?: array<int>|null, document_type?: string, document_number?: string, phone?: string|null, birthdate?: string|null, address?: string|null}  $validated
      * @return RegisterChildSuccess|RegisterChildFailure
      */
     public function execute(User $actor, Family $family, array $validated): array
     {
+        $person = \App\Support\PersonIdentity::extract($validated);
+
         $childrenCount = User::query()
             ->where('family_id', $family->id)
             ->where('role', 'hijo')
@@ -43,6 +45,15 @@ final class RegisterChildAction
                 'status' => 422,
                 'message' => "Tu plan permite hasta {$maxChildren} hijos. Mejora tu plan para agregar más.",
                 'code' => 'children_limit_reached',
+            ];
+        }
+
+        if (empty($person['document_number']) || empty($person['document_type'])) {
+            return [
+                'ok' => false,
+                'status' => 422,
+                'message' => 'El tipo y número de documento son obligatorios para matricular y buscar al alumno.',
+                'code' => 'document_required',
             ];
         }
 
@@ -88,13 +99,26 @@ final class RegisterChildAction
             ];
         }
 
-        $child = User::query()->create([
+        $childPayload = [
             'name' => $validated['name'],
             'email' => 'hijo.'.(string) Str::uuid().'@zumifly.internal',
             'password' => Hash::make(Str::random(32)),
             'role' => 'hijo',
             'family_id' => $family->id,
-        ]);
+            'document_type' => $person['document_type'],
+            'document_number' => $person['document_number'],
+        ];
+        if ($person['phone'] !== null) {
+            $childPayload['phone'] = $person['phone'];
+        }
+        if ($person['birthdate'] !== null) {
+            $childPayload['birthdate'] = $person['birthdate'];
+        }
+        if ($person['address'] !== null) {
+            $childPayload['address'] = $person['address'];
+        }
+
+        $child = User::query()->create($childPayload);
 
         FamilyMember::query()->create([
             'id' => (string) Str::uuid(),

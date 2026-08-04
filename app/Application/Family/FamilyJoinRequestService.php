@@ -21,6 +21,7 @@ class FamilyJoinRequestService
         string $email,
         string $password,
         string $role,
+        array $person = [],
     ): FamilyJoinRequest {
         if ($inviter->family_id !== $family->id) {
             throw ValidationException::withMessages(['invited_by' => 'El invitador no pertenece a esta familia.']);
@@ -44,7 +45,7 @@ class FamilyJoinRequestService
             throw ValidationException::withMessages(['email' => 'Ya hay una solicitud pendiente con este email.']);
         }
 
-        $joinRequest = FamilyJoinRequest::query()->create([
+        $payload = [
             'id' => (string) Str::uuid(),
             'family_id' => $family->id,
             'invited_by_user_id' => $inviter->id,
@@ -53,7 +54,15 @@ class FamilyJoinRequestService
             'password' => $password,
             'role' => $role,
             'status' => 'pending',
-        ]);
+        ];
+
+        foreach (['document_type', 'document_number', 'phone', 'birthdate', 'address'] as $key) {
+            if (array_key_exists($key, $person) && $person[$key] !== null) {
+                $payload[$key] = $person[$key];
+            }
+        }
+
+        $joinRequest = FamilyJoinRequest::query()->create($payload);
 
         event(new JoinRequestChanged(
             familyId: (string) $family->id,
@@ -86,13 +95,20 @@ class FamilyJoinRequestService
             throw ValidationException::withMessages(['email' => 'Este email ya está registrado.']);
         }
 
-        $user = User::query()->create([
+        $userPayload = [
             'name' => $request->name,
             'email' => $request->email,
             'password' => $request->password,
             'role' => $request->role,
             'family_id' => $request->family_id,
-        ]);
+        ];
+        foreach (['document_type', 'document_number', 'phone', 'birthdate', 'address'] as $key) {
+            if ($request->{$key} !== null) {
+                $userPayload[$key] = $request->{$key};
+            }
+        }
+
+        $user = User::query()->create($userPayload);
 
         // email_verified_at no es fillable: forzar verificación (entrada por aprobación familiar).
         $user->forceFill(['email_verified_at' => now()])->save();

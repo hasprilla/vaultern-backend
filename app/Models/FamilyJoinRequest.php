@@ -21,8 +21,20 @@ class FamilyJoinRequest extends Model
         'email',
         'password',
         'role',
+        'document_type',
+        'document_number',
+        'phone',
+        'birthdate',
+        'address',
         'status',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'birthdate' => 'date',
+        ];
+    }
 
     public function family(): BelongsTo
     {

@@ -73,6 +73,7 @@ final class JoinFamilyAction
             $validated['email'],
             $validated['password'],
             $validated['role'],
+            \App\Support\PersonIdentity::extract($validated),
         );
 
         $parentIds = User::query()

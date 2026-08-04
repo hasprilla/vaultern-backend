@@ -28,6 +28,9 @@ class User extends Authenticatable
         'role',
         'document_type',
         'document_number',
+        'phone',
+        'birthdate',
+        'address',
         'avatar',
         'mfa_enabled',
         'mfa_secret',
@@ -54,12 +57,24 @@ class User extends Authenticatable
         return [
             'email_verified_at'          => 'datetime',
             'deactivated_at'             => 'datetime',
+            'birthdate'                  => 'date',
             'password'                   => 'hashed',
             'mfa_enabled'                => 'boolean',
             'mfa_secret'                 => 'encrypted',
             'device_secret_must_rotate'  => 'boolean',
             'notification_preferences'   => 'array',
         ];
+    }
+
+    public function isPlatformAdmin(): bool
+    {
+        return $this->role === FamilyRole::ADMIN->value
+            || ($this->familyRoleSafe()?->isPlatformAdmin() ?? false);
+    }
+
+    public function familyRoleSafe(): ?FamilyRole
+    {
+        return FamilyRole::tryFrom((string) $this->role);
     }
 
     public function hasDeviceRecoveryConfigured(): bool
@@ -284,7 +299,7 @@ class User extends Authenticatable
 
     public function familyRole(): FamilyRole
     {
-        return FamilyRole::from($this->role);
+        return FamilyRole::tryFrom((string) $this->role) ?? FamilyRole::PADRE;
     }
 
     public function canManageFinances(): bool
@@ -335,22 +350,22 @@ class User extends Authenticatable
 
     public function canManageSchool(): bool
     {
-        return $this->familyRole()->canManageSchool();
+        return $this->isPlatformAdmin() || $this->familyRole()->canManageSchool();
     }
 
     public function isSupportAgent(): bool
     {
-        return $this->familyRole()->isSupport();
+        return $this->isPlatformAdmin() || $this->familyRole()->isSupport();
     }
 
     public function isSchoolStaff(): bool
     {
-        return $this->familyRole()->canBroadcastSchoolTasks();
+        return $this->isPlatformAdmin() || $this->familyRole()->canBroadcastSchoolTasks();
     }
 
     public function bypassesFamilyTenant(): bool
     {
-        return $this->familyRole()->bypassesFamilyTenant();
+        return $this->isPlatformAdmin() || $this->familyRole()->bypassesFamilyTenant();
     }
 
     /** @return HasMany<TeacherMembership> */

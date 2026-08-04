@@ -11,6 +11,8 @@ enum FamilyRole: string
     case SOPORTE = 'soporte';
     case DOCENTE = 'docente';
     case ADMIN_ESCUELA = 'admin_escuela';
+    /** Admin de plataforma: ve y opera todas las funcionalidades. */
+    case ADMIN = 'admin';
 
     public function label(): string
     {
@@ -22,46 +24,52 @@ enum FamilyRole: string
             self::SOPORTE => 'Soporte',
             self::DOCENTE => 'Docente',
             self::ADMIN_ESCUELA => 'Admin escuela',
+            self::ADMIN => 'Administrador',
         };
+    }
+
+    public function isPlatformAdmin(): bool
+    {
+        return $this === self::ADMIN;
     }
 
     public function bypassesFamilyTenant(): bool
     {
-        return in_array($this, [self::SOPORTE, self::DOCENTE, self::ADMIN_ESCUELA], true);
+        return in_array($this, [self::SOPORTE, self::DOCENTE, self::ADMIN_ESCUELA, self::ADMIN], true);
     }
 
     public function canBroadcastSchoolTasks(): bool
     {
-        return in_array($this, [self::DOCENTE, self::ADMIN_ESCUELA], true);
+        return in_array($this, [self::DOCENTE, self::ADMIN_ESCUELA, self::ADMIN], true);
     }
 
     public function canManageSchool(): bool
     {
-        return $this === self::ADMIN_ESCUELA;
+        return in_array($this, [self::ADMIN_ESCUELA, self::ADMIN], true);
     }
 
     public function canManageTasks(): bool
     {
-        return in_array($this, [self::PADRE, self::MADRE, self::TUTOR]);
+        return in_array($this, [self::PADRE, self::MADRE, self::TUTOR, self::ADMIN], true);
     }
 
     public function canManageFinances(): bool
     {
-        return in_array($this, [self::PADRE, self::MADRE]);
+        return in_array($this, [self::PADRE, self::MADRE, self::ADMIN], true);
     }
 
     public function canInviteMembers(): bool
     {
-        return in_array($this, [self::PADRE, self::MADRE]);
+        return in_array($this, [self::PADRE, self::MADRE, self::ADMIN], true);
     }
 
     public function canManageSupportTickets(): bool
     {
-        return $this === self::SOPORTE;
+        return in_array($this, [self::SOPORTE, self::ADMIN], true);
     }
 
     public function isSupport(): bool
     {
-        return $this === self::SOPORTE;
+        return $this === self::SOPORTE || $this === self::ADMIN;
     }
 }

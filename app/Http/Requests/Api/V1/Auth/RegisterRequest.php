@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\Api\V1\Auth;
 
+use App\Support\PersonIdentity;
 use Illuminate\Foundation\Http\FormRequest;
 
 class RegisterRequest extends FormRequest
@@ -15,7 +16,7 @@ class RegisterRequest extends FormRequest
 
     public function rules(): array
     {
-        return [
+        return array_merge([
             'name'       => ['required', 'string', 'min:2', 'max:120'],
             'email'      => [
                 'required',
@@ -35,6 +36,20 @@ class RegisterRequest extends FormRequest
             'device_id'  => ['nullable', 'string', 'max:255'],
             'platform'   => ['nullable', 'string', 'max:32'],
             'fcm_token'  => ['nullable', 'string', 'max:512'],
-        ];
+        ], PersonIdentity::rules(documentRequired: true));
+    }
+
+    protected function prepareForValidation(): void
+    {
+        if ($this->has('document_number')) {
+            $this->merge([
+                'document_number' => PersonIdentity::normalizeDocumentNumber((string) $this->input('document_number')),
+            ]);
+        }
+        if ($this->has('document_type')) {
+            $this->merge([
+                'document_type' => strtoupper(trim((string) $this->input('document_type'))),
+            ]);
+        }
     }
 }

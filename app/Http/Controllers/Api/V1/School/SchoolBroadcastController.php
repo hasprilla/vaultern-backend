@@ -8,6 +8,7 @@ use App\Application\School\Actions\CreateSchoolBroadcastAction;
 use App\Http\Controllers\Controller;
 use App\Models\School;
 use App\Models\SchoolClass;
+use App\Models\SchoolSubscription;
 use App\Models\SchoolTaskBroadcast;
 use App\Models\TeacherMembership;
 use Illuminate\Http\JsonResponse;
@@ -94,20 +95,108 @@ class SchoolBroadcastController extends Controller
 
     public function schools(Request $request): JsonResponse
     {
-        $schoolIds = $this->schoolIdsFor($request);
+        $user = $request->user();
 
-        $schools = School::query()
-            ->whereIn('id', $schoolIds)
-            ->where('is_active', true)
-            ->withCount('classes')
+        if ($user->isPlatformAdmin()) {
+            $schools = School::query()
+                ->where('is_active', true)
+                ->withCount('classes')
+                ->orderBy('name')
+                ->get();
+
+            $subscriptions = SchoolSubscription::query()
+                ->whereIn('school_id', $schools->pluck('id'))
+                ->get()
+                ->keyBy('school_id');
+
+            $data = $schools->map(static function (School $school) use ($subscriptions) {
+                $sub = $subscriptions->get($school->id);
+
+                return [
+                    'id' => $school->id,
+                    'name' => $school->name,
+                    'code' => $school->code,
+                    'city' => $school->city,
+                    'plan' => $school->plan,
+                    'is_active' => $school->is_active,
+                    'classes_count' => $school->classes_count ?? 0,
+                    'membership' => [
+                        'id' => null,
+                        'role' => 'admin',
+                        'status' => 'active',
+                    ],
+                    'subscription' => $sub === null ? null : [
+                        'id' => $sub->id,
+                        'plan_code' => $sub->plan_code,
+                        'status' => $sub->status,
+                        'billing' => $sub->billing,
+                        'current_period_end' => $sub->current_period_end,
+                    ],
+                ];
+            })->values();
+
+            return response()->json(['data' => $data]);
+        }
+
+        $memberships = TeacherMembership::query()
+            ->where('user_id', $user->id)
+            ->where('status', 'active')
+            ->with(['school' => static fn ($q) => $q->where('is_active', true)->withCount('classes')])
+            ->orderByDesc('updated_at')
             ->get();
 
-        return response()->json(['data' => $schools]);
+        $schoolIds = $memberships
+            ->pluck('school_id')
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        $subscriptions = SchoolSubscription::query()
+            ->whereIn('school_id', $schoolIds)
+            ->get()
+            ->keyBy('school_id');
+
+        $data = $memberships
+            ->filter(static fn (TeacherMembership $m) => $m->school !== null)
+            ->map(static function (TeacherMembership $m) use ($subscriptions) {
+                $school = $m->school;
+                $sub = $subscriptions->get($school->id);
+
+                return [
+                    'id' => $school->id,
+                    'name' => $school->name,
+                    'code' => $school->code,
+                    'city' => $school->city,
+                    'plan' => $school->plan,
+                    'is_active' => $school->is_active,
+                    'classes_count' => $school->classes_count ?? 0,
+                    'membership' => [
+                        'id' => $m->id,
+                        'role' => $m->role,
+                        'status' => $m->status,
+                    ],
+                    'subscription' => $sub === null ? null : [
+                        'id' => $sub->id,
+                        'plan_code' => $sub->plan_code,
+                        'status' => $sub->status,
+                        'billing' => $sub->billing,
+                        'current_period_end' => $sub->current_period_end,
+                    ],
+                ];
+            })
+            ->values();
+
+        return response()->json(['data' => $data]);
     }
 
     /** @return array<int, string> */
     private function schoolIdsFor(Request $request): array
     {
+        if ($request->user()->isPlatformAdmin()) {
+            return School::query()->pluck('id')->map(fn ($id) => (string) $id)->all();
+        }
+
         return TeacherMembership::query()
             ->where('user_id', $request->user()->id)
             ->where('status', 'active')
@@ -117,12 +206,8 @@ class SchoolBroadcastController extends Controller
 
     private function userBelongsToSchool(Request $request, string $schoolId): bool
     {
-        if ($request->user()->canManageSchool()) {
-            return TeacherMembership::query()
-                ->where('user_id', $request->user()->id)
-                ->where('school_id', $schoolId)
-                ->where('status', 'active')
-                ->exists();
+        if ($request->user()->isPlatformAdmin()) {
+            return true;
         }
 
         return TeacherMembership::query()

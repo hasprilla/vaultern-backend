@@ -7,6 +7,7 @@ namespace App\Application\Auth;
 use App\Models\Family;
 use App\Models\FamilyMember;
 use App\Models\User;
+use App\Support\PersonIdentity;
 use App\Support\SchemaCompat;
 use Illuminate\Support\Str;
 
@@ -18,20 +19,21 @@ final class RegisterUserAction
     ) {}
 
     /**
-     * @param  array{name: string, email: string, password: string, role: string, device_id?: string|null, platform?: string|null, fcm_token?: string|null}  $input
+     * @param  array<string, mixed>  $input
      * @return array{email: string, delivery: array{code: string, delivered: bool, channels: array{push: bool, mail: bool}}}
      */
     public function execute(array $input): array
     {
         $email = $input['email'];
+        $person = PersonIdentity::extract($input);
         $existing = User::query()->where('email', $email)->first();
 
         if ($existing !== null && $existing->email_verified_at === null) {
-            $existing->update([
+            $existing->update(array_merge([
                 'name' => $input['name'],
                 'password' => $input['password'],
                 'role' => $input['role'],
-            ]);
+            ], $this->personAttrs($person)));
 
             FamilyMember::query()
                 ->where('user_id', $existing->id)
@@ -49,13 +51,13 @@ final class RegisterUserAction
             'plan' => 'free',
         ]);
 
-        $user = User::query()->create([
+        $user = User::query()->create(array_merge([
             'name' => $input['name'],
             'email' => $input['email'],
             'password' => $input['password'],
             'role' => $input['role'],
             'family_id' => $family->id,
-        ]);
+        ], $this->personAttrs($person)));
 
         if (SchemaCompat::hasColumn('families', 'owner_user_id')) {
             $family->update(['owner_user_id' => $user->id]);
@@ -73,6 +75,25 @@ final class RegisterUserAction
         $delivery = $this->emailVerification->send($user);
 
         return ['email' => $user->email, 'delivery' => $delivery];
+    }
+
+    /**
+     * @param  array{document_type: ?string, document_number: ?string, phone: ?string, birthdate: ?string, address: ?string}  $person
+     * @return array<string, mixed>
+     */
+    private function personAttrs(array $person): array
+    {
+        $attrs = [];
+        foreach (['document_type', 'document_number', 'phone', 'birthdate', 'address'] as $key) {
+            if (! SchemaCompat::hasColumn('users', $key)) {
+                continue;
+            }
+            if ($person[$key] !== null) {
+                $attrs[$key] = $person[$key];
+            }
+        }
+
+        return $attrs;
     }
 
     /**

@@ -195,6 +195,8 @@ Route::prefix('v1')->middleware(['api.auth', 'device.recovery', 'tenant'])->grou
     Route::patch('/school/admin/{school}/campuses/{campus}', [SchoolAdminController::class, 'updateCampus']);
     Route::post('/school/admin/{school}/staff/invite', [SchoolAdminController::class, 'inviteStaff']);
     Route::get('/school/admin/{school}/staff', [SchoolAdminController::class, 'listStaff']);
+    Route::get('/school/admin/{school}/staff/invites', [SchoolAdminController::class, 'listStaffInvites']);
+    Route::patch('/school/admin/{school}/staff/{membership}', [SchoolAdminController::class, 'updateStaffMembership']);
     Route::get('/school/admin/{school}/students/lookup', [SchoolAdminController::class, 'lookupStudentByDocument']);
     Route::post('/school/admin/{school}/students/enroll', [SchoolAdminController::class, 'enrollByDocument']);
     Route::get('/school/admin/{school}/groups', [SchoolAdminController::class, 'listGroups']);
@@ -214,6 +216,7 @@ Route::prefix('v1')->middleware(['api.auth', 'device.recovery', 'tenant'])->grou
     Route::post('/school/admin/{school}/health-alerts', [SchoolAdminController::class, 'storeHealthAlert']);
     Route::get('/school/admin/{school}/health-alerts', [SchoolAdminController::class, 'listHealthAlerts']);
     Route::get('/school/admin/{school}/subscription', [SchoolAdminController::class, 'schoolSubscription']);
+    Route::patch('/school/admin/{school}/subscription', [SchoolAdminController::class, 'updateSchoolSubscription']);
 
     Route::post('/school/meetings/{meeting}/rsvp', [SchoolAdminController::class, 'respondMeeting']);
     Route::patch('/school/schedules/{schedule}', [SchoolAdminController::class, 'updateSchedule']);

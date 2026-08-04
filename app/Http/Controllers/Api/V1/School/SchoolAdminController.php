@@ -250,11 +250,88 @@ class SchoolAdminController extends Controller
         $staff = TeacherMembership::query()
             ->with(['user:id,name,email,role'])
             ->where('school_id', $school->id)
-            ->where('status', 'active')
             ->orderBy('role')
+            ->orderByDesc('updated_at')
             ->get();
 
         return response()->json(['data' => $staff]);
+    }
+
+    public function listStaffInvites(Request $request, School $school): JsonResponse
+    {
+        if (! $this->assertManagesSchool($request->user(), $school)) {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
+        $invites = SchoolStaffInvite::query()
+            ->where('school_id', $school->id)
+            ->where('status', 'pending')
+            ->orderByDesc('created_at')
+            ->get();
+
+        return response()->json(['data' => $invites]);
+    }
+
+    public function updateStaffMembership(Request $request, School $school, TeacherMembership $membership): JsonResponse
+    {
+        if (! $this->assertManagesSchool($request->user(), $school)) {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
+        if ((string) $membership->school_id !== (string) $school->id) {
+            return response()->json(['message' => 'Membresía no pertenece a este colegio'], 404);
+        }
+
+        $validated = $request->validate([
+            'role' => ['sometimes', Rule::in(['admin', 'teacher'])],
+            'status' => ['sometimes', Rule::in(['active', 'inactive', 'suspended'])],
+        ]);
+
+        if (isset($validated['role']) && $validated['role'] === 'teacher' && $membership->role === 'admin') {
+            $otherAdmins = TeacherMembership::query()
+                ->where('school_id', $school->id)
+                ->where('status', 'active')
+                ->where('role', 'admin')
+                ->where('id', '!=', $membership->id)
+                ->count();
+
+            if ($otherAdmins === 0) {
+                return response()->json([
+                    'message' => 'Debe quedar al menos un administrador activo en el colegio',
+                ], 422);
+            }
+        }
+
+        if (isset($validated['status'])
+            && $validated['status'] !== 'active'
+            && $membership->role === 'admin'
+            && $membership->status === 'active'
+        ) {
+            $otherAdmins = TeacherMembership::query()
+                ->where('school_id', $school->id)
+                ->where('status', 'active')
+                ->where('role', 'admin')
+                ->where('id', '!=', $membership->id)
+                ->count();
+
+            if ($otherAdmins === 0) {
+                return response()->json([
+                    'message' => 'No puedes desactivar al único administrador del colegio',
+                ], 422);
+            }
+        }
+
+        $membership->fill($validated);
+        $membership->save();
+
+        if (isset($validated['role']) && $membership->user !== null) {
+            $appRole = $validated['role'] === 'admin' ? 'admin_escuela' : 'docente';
+            $membership->user->forceFill(['role' => $appRole])->save();
+        }
+
+        $membership->load(['user:id,name,email,role']);
+
+        return response()->json(['data' => $membership]);
     }
 
     public function acceptStaffInvite(Request $request): JsonResponse
@@ -329,16 +406,18 @@ class SchoolAdminController extends Controller
             'document_number' => ['required', 'string', 'max:64'],
         ]);
 
+        $documentNumber = \App\Support\PersonIdentity::normalizeDocumentNumber($validated['document_number']);
+
         $query = User::query()
             ->where('role', 'hijo')
-            ->where('document_number', $validated['document_number']);
+            ->where('document_number', $documentNumber);
 
         if (! empty($validated['document_type'])) {
-            $query->where('document_type', $validated['document_type']);
+            $query->where('document_type', strtoupper($validated['document_type']));
         }
 
         $students = $query
-            ->get(['id', 'name', 'email', 'role', 'family_id', 'document_type', 'document_number']);
+            ->get(['id', 'name', 'email', 'role', 'family_id', 'document_type', 'document_number', 'phone', 'birthdate']);
 
         return response()->json(['data' => $students]);
     }
@@ -359,12 +438,14 @@ class SchoolAdminController extends Controller
             ],
         ]);
 
+        $documentNumber = \App\Support\PersonIdentity::normalizeDocumentNumber($validated['document_number']);
+
         $studentQuery = User::query()
             ->where('role', 'hijo')
-            ->where('document_number', $validated['document_number']);
+            ->where('document_number', $documentNumber);
 
         if (! empty($validated['document_type'])) {
-            $studentQuery->where('document_type', $validated['document_type']);
+            $studentQuery->where('document_type', strtoupper($validated['document_type']));
         }
 
         $student = $studentQuery->first();
@@ -1181,7 +1262,7 @@ class SchoolAdminController extends Controller
 
     public function schoolSubscription(Request $request, School $school): JsonResponse
     {
-        if (! $this->assertManagesSchool($request->user(), $school)) {
+        if (! $this->assertBelongsToSchool($request->user(), $school)) {
             return response()->json(['message' => 'Forbidden'], 403);
         }
 
@@ -1195,7 +1276,67 @@ class SchoolAdminController extends Controller
             ],
         );
 
-        return response()->json(['data' => $subscription]);
+        return response()->json([
+            'data' => [
+                ...$subscription->toArray(),
+                'can_manage' => $this->assertManagesSchool($request->user(), $school),
+                'label' => $this->subscriptionLabel($subscription->plan_code),
+                'features' => $this->subscriptionFeatures($subscription->plan_code),
+            ],
+        ]);
+    }
+
+    public function updateSchoolSubscription(Request $request, School $school): JsonResponse
+    {
+        if (! $this->assertManagesSchool($request->user(), $school)) {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
+        $validated = $request->validate([
+            'plan_code' => ['sometimes', Rule::in(['school', 'school_trial', 'school_pro'])],
+            'status' => ['sometimes', Rule::in(['active', 'trialing', 'past_due', 'canceled', 'inactive'])],
+            'billing' => ['sometimes', Rule::in(['monthly', 'yearly'])],
+            'renew_months' => ['sometimes', 'integer', 'min:1', 'max:24'],
+        ]);
+
+        $subscription = SchoolSubscription::query()->firstOrCreate(
+            ['school_id' => $school->id],
+            [
+                'id' => (string) Str::uuid(),
+                'plan_code' => 'school',
+                'status' => 'active',
+                'billing' => 'monthly',
+            ],
+        );
+
+        if (isset($validated['plan_code'])) {
+            $subscription->plan_code = $validated['plan_code'];
+            $school->forceFill(['plan' => $validated['plan_code']])->save();
+        }
+        if (isset($validated['status'])) {
+            $subscription->status = $validated['status'];
+        }
+        if (isset($validated['billing'])) {
+            $subscription->billing = $validated['billing'];
+        }
+        if (isset($validated['renew_months'])) {
+            $base = $subscription->current_period_end !== null && $subscription->current_period_end->isFuture()
+                ? $subscription->current_period_end
+                : now();
+            $subscription->current_period_end = $base->copy()->addMonths((int) $validated['renew_months']);
+            $subscription->status = 'active';
+        }
+
+        $subscription->save();
+
+        return response()->json([
+            'data' => [
+                ...$subscription->fresh()->toArray(),
+                'can_manage' => true,
+                'label' => $this->subscriptionLabel($subscription->plan_code),
+                'features' => $this->subscriptionFeatures($subscription->plan_code),
+            ],
+        ]);
     }
 
     public function overview(Request $request, School $school): JsonResponse
@@ -1204,47 +1345,112 @@ class SchoolAdminController extends Controller
             return response()->json(['message' => 'Forbidden'], 403);
         }
 
+        $membership = TeacherMembership::query()
+            ->where('user_id', $request->user()->id)
+            ->where('school_id', $school->id)
+            ->where('status', 'active')
+            ->first();
+
+        $subscription = SchoolSubscription::query()->where('school_id', $school->id)->first();
+
+        $classIds = SchoolClass::query()->where('school_id', $school->id)->pluck('id');
+        $studentsCount = ClassEnrollment::query()
+            ->whereIn('school_class_id', $classIds)
+            ->where('status', 'active')
+            ->count();
+
         return response()->json([
             'data' => [
                 'school' => $school->only(['id', 'name', 'code', 'city', 'plan', 'is_active']),
+                'membership' => $membership === null ? null : [
+                    'id' => $membership->id,
+                    'role' => $membership->role,
+                    'status' => $membership->status,
+                ],
+                'subscription' => $subscription === null ? null : [
+                    'id' => $subscription->id,
+                    'plan_code' => $subscription->plan_code,
+                    'status' => $subscription->status,
+                    'billing' => $subscription->billing,
+                    'current_period_end' => $subscription->current_period_end,
+                    'label' => $this->subscriptionLabel($subscription->plan_code),
+                ],
+                'can_manage' => $membership !== null && $membership->role === 'admin',
                 'counts' => [
                     'campuses' => SchoolCampus::query()->where('school_id', $school->id)->count(),
                     'staff' => TeacherMembership::query()
                         ->where('school_id', $school->id)
                         ->where('status', 'active')
                         ->count(),
-                    'classes' => SchoolClass::query()->where('school_id', $school->id)->count(),
+                    'classes' => $classIds->count(),
                     'groups' => SchoolGroup::query()
                         ->where('school_id', $school->id)
                         ->where('is_active', true)
                         ->count(),
                     'meetings' => SchoolMeeting::query()->where('school_id', $school->id)->count(),
+                    'students' => $studentsCount,
+                    'pending_invites' => SchoolStaffInvite::query()
+                        ->where('school_id', $school->id)
+                        ->where('status', 'pending')
+                        ->count(),
                 ],
             ],
         ]);
     }
 
-    private function assertManagesSchool(User $user, School $school): bool
+    private function subscriptionLabel(string $planCode): string
     {
-        $membership = TeacherMembership::query()
-            ->where('user_id', $user->id)
-            ->where('school_id', $school->id)
-            ->where('status', 'active')
-            ->first();
+        return match ($planCode) {
+            'school_pro' => 'Escuela Pro',
+            'school_trial' => 'Prueba escolar',
+            default => 'Escuela',
+        };
+    }
 
-        if ($membership === null) {
-            return false;
+    /** @return list<string> */
+    private function subscriptionFeatures(string $planCode): array
+    {
+        $base = [
+            'Panel admin y docentes',
+            'Sedes y grupos',
+            'Comunicación a familias',
+            'Reuniones y horarios',
+        ];
+
+        if ($planCode === 'school_pro') {
+            return [...$base, 'Cupos ampliados', 'Seguimiento psicologia/salud prioritario'];
         }
 
-        if ($membership->role === 'admin') {
+        if ($planCode === 'school_trial') {
+            return [...$base, 'Vigencia de prueba limitada'];
+        }
+
+        return $base;
+    }
+
+    /**
+     * Gestión: membresía admin del colegio O administrador de plataforma.
+     */
+    private function assertManagesSchool(User $user, School $school): bool
+    {
+        if ($user->isPlatformAdmin()) {
             return true;
         }
 
-        return $user->canManageSchool();
+        return TeacherMembership::query()
+            ->where('user_id', $user->id)
+            ->where('school_id', $school->id)
+            ->where('status', 'active')
+            ->where('role', 'admin')
+            ->exists();
     }
 
     private function assertBelongsToSchool(User $user, School $school): bool
     {
+        if ($user->isPlatformAdmin()) {
+            return true;
+        }
+
         return TeacherMembership::query()
             ->where('user_id', $user->id)
             ->where('school_id', $school->id)
@@ -1255,6 +1461,10 @@ class SchoolAdminController extends Controller
     /** @return list<string> */
     private function schoolIdsFor(User $user): array
     {
+        if ($user->isPlatformAdmin()) {
+            return School::query()->pluck('id')->map(fn ($id) => (string) $id)->all();
+        }
+
         return TeacherMembership::query()
             ->where('user_id', $user->id)
             ->where('status', 'active')
