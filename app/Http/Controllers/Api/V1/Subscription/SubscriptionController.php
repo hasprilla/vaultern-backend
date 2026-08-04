@@ -51,11 +51,11 @@ class SubscriptionController extends Controller
     {
         SubscriptionPlanCatalog::ensureSeeded();
 
-        // Solo planes de tutores/familia (la institución tiene su propio plan).
-        $plans = Cache::remember('subscription_plans.active.family.v3', 300, static function () {
+        // Familia + tutores (comprables). Instituciones se ven aparte en la app.
+        $plans = Cache::remember('subscription_plans.active.consumer.v4', 300, static function () {
             return SubscriptionPlan::query()
                 ->where('is_active', true)
-                ->whereIn('code', SubscriptionPlanCatalog::codesForAudience(SubscriptionPlanCatalog::AUDIENCE_FAMILY))
+                ->whereIn('code', SubscriptionPlanCatalog::consumerPlanCodes())
                 ->orderBy('sort_order')
                 ->get();
         });
@@ -68,6 +68,11 @@ class SubscriptionController extends Controller
                 'checkout' => $wompiEnabled ? 'wompi' : 'simulated',
                 'wompi_enabled' => $wompiEnabled,
                 'currency' => 'COP',
+                'audiences' => [
+                    'family' => SubscriptionPlanCatalog::codesForAudience(SubscriptionPlanCatalog::AUDIENCE_FAMILY),
+                    'tutor' => SubscriptionPlanCatalog::codesForAudience(SubscriptionPlanCatalog::AUDIENCE_TUTOR),
+                    'school' => SubscriptionPlanCatalog::codesForAudience(SubscriptionPlanCatalog::AUDIENCE_SCHOOL),
+                ],
             ],
         ]);
     }
@@ -92,7 +97,32 @@ class SubscriptionController extends Controller
     {
         $family = $this->resolveFamily($request);
         if ($family === null) {
-            return response()->json(['message' => 'Familia no encontrada'], 404);
+            // Staff / sin núcleo: no es error de app — plan personal no aplica.
+            return response()->json([
+                'data' => [
+                    'plan_code' => 'free',
+                    'billing' => null,
+                    'provider' => null,
+                    'mode' => 'live',
+                    'subscription' => null,
+                    'features' => $this->planFeatures->featuresForPlanCode('free'),
+                    'current_period_end' => null,
+                    'cancelled_at' => null,
+                    'pending_cancellation' => false,
+                    'access_until' => null,
+                    'free_from' => null,
+                    'auto_renew' => false,
+                    'past_due' => false,
+                    'renewal_grace_ends_at' => null,
+                    'pending_plan_code' => null,
+                    'pending_billing' => null,
+                    'pending_change_at' => null,
+                    'saved_payment_method' => null,
+                    'saved_payment_methods' => [],
+                    'default_payment_method_id' => null,
+                    'has_family' => false,
+                ],
+            ]);
         }
 
         $subscription = $family->subscription;

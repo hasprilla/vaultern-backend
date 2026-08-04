@@ -4,33 +4,43 @@ declare(strict_types=1);
 
 namespace Database\Seeders;
 
+use App\Models\AppNotification;
+use App\Models\Budget;
 use App\Models\ChildGuardian;
 use App\Models\ClassEnrollment;
 use App\Models\Device;
 use App\Models\Family;
 use App\Models\FamilyMember;
 use App\Models\School;
+use App\Models\SchoolAnnouncement;
 use App\Models\SchoolCampus;
 use App\Models\SchoolClass;
 use App\Models\SchoolGroup;
 use App\Models\SchoolGroupMember;
+use App\Models\SchoolMeeting;
+use App\Models\SchoolMeetingRsvp;
 use App\Models\SchoolStaffInvite;
 use App\Models\SchoolSubscription;
+use App\Models\SchoolTeacherTask;
+use App\Models\Subscription;
+use App\Models\Task;
 use App\Models\TeacherMembership;
+use App\Models\Transaction;
 use App\Models\User;
 use App\Support\DeviceSecurityQuestions;
 use App\Support\SchemaCompat;
+use App\Support\SubscriptionPlanCatalog;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 /**
- * Usuarios QA listos para login en prod: un caso por rol.
+ * Usuarios QA listos para login en prod: flujos familiares, tutor, colegio y plataforma.
  *
  * Clave de app: password
  * Clave secreta dispositivo: secret1234
- * Respuesta de seguridad: bogota (pregunta: ¿En qué ciudad naciste? / key: city)
+ * Respuesta de seguridad: bogota (pregunta key: city)
  */
 class QaUsersSeeder extends Seeder
 {
@@ -64,24 +74,31 @@ class QaUsersSeeder extends Seeder
 
     public function run(): void
     {
+        SubscriptionPlanCatalog::ensureSeeded();
+
         $family = $this->seedFamilyHub();
         $school = $this->seedSchool($family);
+        $this->seedFamilyActivity($family);
+        $this->seedSchoolActivity($school, $family);
         $this->seedFreeFamily();
+        $this->seedTutorSoloFamily();
         $this->seedStaffInvite($school);
         $this->seedPlatformAdmin($school);
 
         $this->command?->info('');
         $this->command?->info('=== Cuentas QA (password: password) ===');
-        $this->command?->info('Admin plataforma (todas las funciones): '.self::PLATFORM_ADMIN_EMAIL);
-        $this->command?->info('Padre:   '.self::PADRE_EMAIL);
-        $this->command?->info('Madre:   '.self::MADRE_EMAIL);
-        $this->command?->info('Tutor:   '.self::TUTOR_EMAIL);
-        $this->command?->info('Free:    '.self::FREE_EMAIL);
-        $this->command?->info('Admin escuela: '.self::ADMIN_EMAIL);
-        $this->command?->info('Docente: '.self::DOCENTE_EMAIL);
-        $this->command?->info('Colegio código: '.self::SCHOOL_CODE);
-        $this->command?->info('Hijos doc: TI 1001001001 (Sofía), TI 1001001002 (Lucas)');
-        $this->command?->info('Device secret: '.self::DEVICE_SECRET.' · respuesta: '.self::SECURITY_ANSWER);
+        $this->command?->info('Admin plataforma:  '.self::PLATFORM_ADMIN_EMAIL);
+        $this->command?->info('Padre (Plus):      '.self::PADRE_EMAIL);
+        $this->command?->info('Madre:             '.self::MADRE_EMAIL);
+        $this->command?->info('Tutor (en familia):'.self::TUTOR_EMAIL);
+        $this->command?->info('Free:              '.self::FREE_EMAIL);
+        $this->command?->info('Admin escuela:     '.self::ADMIN_EMAIL);
+        $this->command?->info('Docente:           '.self::DOCENTE_EMAIL);
+        $this->command?->info('Colegio código:    '.self::SCHOOL_CODE);
+        $this->command?->info('Familia invite:    QAFAMILY  · Free: QAFREE01');
+        $this->command?->info('Hijos: TI 1001001001 Sofía · TI 1001001002 Lucas');
+        $this->command?->info('Device secret:     '.self::DEVICE_SECRET.' · respuesta: '.self::SECURITY_ANSWER);
+        $this->command?->info('Staff invite: qa.docente.pendiente@yopmail.com · QAINVITE1');
     }
 
     private function seedPlatformAdmin(School $school): void
@@ -145,12 +162,26 @@ class QaUsersSeeder extends Seeder
             ['invite_code' => 'QAFAMILY'],
             [
                 'name' => 'Familia QA Zumifly',
-                'plan' => 'free',
+                'plan' => 'family_plus',
                 'owner_user_id' => $padre->id,
                 'timezone' => 'America/Bogota',
                 'settings' => ['locale' => 'es', 'currency' => 'COP'],
             ],
         );
+
+        if (Schema::hasTable('subscriptions')) {
+            Subscription::query()->updateOrCreate(
+                ['family_id' => $family->id],
+                [
+                    'plan_code' => 'family_plus',
+                    'billing' => 'monthly',
+                    'status' => 'active',
+                    'provider' => 'simulated',
+                    'current_period_end' => now()->addMonth(),
+                    'cancelled_at' => null,
+                ],
+            );
+        }
 
         $hijo1 = $this->upsertUser(
             self::HIJO_EMAIL,
@@ -182,21 +213,21 @@ class QaUsersSeeder extends Seeder
         }
 
         $roles = [
-            [$padre, 'padre'],
-            [$madre, 'madre'],
-            [$tutor, 'tutor'],
-            [$hijo1, 'hijo'],
-            [$hijo2, 'hijo'],
+            [$padre, 'padre', true, true],
+            [$madre, 'madre', true, true],
+            [$tutor, 'tutor', true, false],
+            [$hijo1, 'hijo', false, false],
+            [$hijo2, 'hijo', false, false],
         ];
-        foreach ($roles as [$user, $role]) {
+        foreach ($roles as [$user, $role, $canTasks, $canFinances]) {
             FamilyMember::query()->updateOrCreate(
                 ['family_id' => $family->id, 'user_id' => $user->id],
                 [
                     'role' => $role,
                     'status' => 'active',
                     'joined_at' => now()->subMonth(),
-                    'can_tasks' => $role !== 'hijo',
-                    'can_finances' => in_array($role, ['padre', 'madre'], true),
+                    'can_tasks' => $canTasks,
+                    'can_finances' => $canFinances,
                 ],
             );
         }
@@ -219,7 +250,150 @@ class QaUsersSeeder extends Seeder
             }
         }
 
-        return $family;
+        return $family->fresh();
+    }
+
+    private function seedFamilyActivity(Family $family): void
+    {
+        $padre = User::query()->where('email', self::PADRE_EMAIL)->first();
+        $madre = User::query()->where('email', self::MADRE_EMAIL)->first();
+        $hijo1 = User::query()->where('email', self::HIJO_EMAIL)->first();
+        $hijo2 = User::query()->where('email', self::HIJO2_EMAIL)->first();
+        if ($padre === null || $hijo1 === null) {
+            return;
+        }
+
+        if (Schema::hasTable('tasks')) {
+            Task::query()->updateOrCreate(
+                [
+                    'family_id' => $family->id,
+                    'title' => 'Matemáticas – fracciones',
+                ],
+                [
+                    'created_by' => $padre->id,
+                    'assigned_to' => $hijo1->id,
+                    'created_by_role' => 'padre',
+                    'description' => 'Terminar página 24 del cuaderno.',
+                    'status' => 'pending',
+                    'priority' => 'alta',
+                    'is_school' => true,
+                    'subject' => 'Matemáticas',
+                    'due_date' => now()->addDays(2)->toDateString(),
+                ],
+            );
+            Task::query()->updateOrCreate(
+                [
+                    'family_id' => $family->id,
+                    'title' => 'Ordenar habitación',
+                ],
+                [
+                    'created_by' => $madre?->id ?? $padre->id,
+                    'assigned_to' => $hijo2?->id ?? $hijo1->id,
+                    'created_by_role' => 'madre',
+                    'description' => 'Tarea del hogar QA.',
+                    'status' => 'pending',
+                    'priority' => 'media',
+                    'is_school' => false,
+                    'due_date' => now()->addDay()->toDateString(),
+                ],
+            );
+            Task::query()->updateOrCreate(
+                [
+                    'family_id' => $family->id,
+                    'title' => 'Lectura de 15 minutos',
+                ],
+                [
+                    'created_by' => $padre->id,
+                    'assigned_to' => $hijo1->id,
+                    'created_by_role' => 'padre',
+                    'description' => 'Completada como ejemplo.',
+                    'status' => 'done',
+                    'priority' => 'baja',
+                    'is_school' => false,
+                    'due_date' => now()->subDay()->toDateString(),
+                    'completed_at' => now()->subHours(6),
+                ],
+            );
+        }
+
+        if (Schema::hasTable('transactions')) {
+            Transaction::query()->updateOrCreate(
+                [
+                    'family_id' => $family->id,
+                    'description' => 'Útiles escolares Sofía',
+                ],
+                [
+                    'user_id' => $padre->id,
+                    'child_id' => $hijo1->id,
+                    'amount' => 85000,
+                    'currency' => 'COP',
+                    'type' => 'expense',
+                    'category' => 'educacion',
+                    'transaction_date' => now()->subDays(3)->toDateString(),
+                ],
+            );
+            Transaction::query()->updateOrCreate(
+                [
+                    'family_id' => $family->id,
+                    'description' => 'Mesada Lucas',
+                ],
+                [
+                    'user_id' => $madre?->id ?? $padre->id,
+                    'child_id' => $hijo2?->id,
+                    'amount' => 20000,
+                    'currency' => 'COP',
+                    'type' => 'expense',
+                    'category' => 'mesada',
+                    'transaction_date' => now()->subDay()->toDateString(),
+                ],
+            );
+            Transaction::query()->updateOrCreate(
+                [
+                    'family_id' => $family->id,
+                    'description' => 'Ingreso familiar QA',
+                ],
+                [
+                    'user_id' => $padre->id,
+                    'amount' => 3500000,
+                    'currency' => 'COP',
+                    'type' => 'income',
+                    'category' => 'salario',
+                    'transaction_date' => now()->startOfMonth()->toDateString(),
+                ],
+            );
+        }
+
+        if (Schema::hasTable('budgets')) {
+            Budget::query()->updateOrCreate(
+                [
+                    'family_id' => $family->id,
+                    'name' => 'Educación mes',
+                ],
+                [
+                    'amount' => 400000,
+                    'currency' => 'COP',
+                    'period' => 'monthly',
+                    'start_date' => now()->startOfMonth()->toDateString(),
+                    'end_date' => now()->endOfMonth()->toDateString(),
+                ],
+            );
+        }
+
+        if (Schema::hasTable('notifications')) {
+            AppNotification::query()->updateOrCreate(
+                [
+                    'family_id' => $family->id,
+                    'user_id' => $padre->id,
+                    'title' => 'Bienvenida QA',
+                ],
+                [
+                    'type' => 'system',
+                    'body' => 'Núcleo listo: plan Familia Plus, hijos y colegio enlazados.',
+                    'data' => ['seed' => 'qa'],
+                    'read' => false,
+                ],
+            );
+        }
     }
 
     private function seedSchool(Family $family): School
@@ -317,8 +491,11 @@ class QaUsersSeeder extends Seeder
             );
         }
 
-        $hijo = User::query()->where('email', self::HIJO_EMAIL)->first();
-        if ($hijo !== null && $hijo->family_id !== null) {
+        foreach ([self::HIJO_EMAIL, self::HIJO2_EMAIL] as $email) {
+            $hijo = User::query()->where('email', $email)->first();
+            if ($hijo === null || $hijo->family_id === null) {
+                continue;
+            }
             ClassEnrollment::query()->updateOrCreate(
                 [
                     'school_class_id' => $class->id,
@@ -345,23 +522,134 @@ class QaUsersSeeder extends Seeder
             );
 
             $padre = User::query()->where('email', self::PADRE_EMAIL)->first();
+            $madre = User::query()->where('email', self::MADRE_EMAIL)->first();
             if ($padre !== null) {
                 SchoolGroupMember::query()->updateOrCreate(
                     ['school_group_id' => $group->id, 'user_id' => $padre->id],
-                    [
-                        'member_role' => 'member',
-                    ],
+                    ['member_role' => 'member'],
+                );
+            }
+            if ($madre !== null) {
+                SchoolGroupMember::query()->updateOrCreate(
+                    ['school_group_id' => $group->id, 'user_id' => $madre->id],
+                    ['member_role' => 'member'],
                 );
             }
             SchoolGroupMember::query()->updateOrCreate(
                 ['school_group_id' => $group->id, 'user_id' => $docente->id],
+                ['member_role' => 'owner'],
+            );
+        }
+
+        return $school->fresh();
+    }
+
+    private function seedSchoolActivity(School $school, Family $family): void
+    {
+        $admin = User::query()->where('email', self::ADMIN_EMAIL)->first();
+        $docente = User::query()->where('email', self::DOCENTE_EMAIL)->first();
+        $padre = User::query()->where('email', self::PADRE_EMAIL)->first();
+        $class = SchoolClass::query()
+            ->where('school_id', $school->id)
+            ->where('name', '3°B QA')
+            ->first();
+        $group = Schema::hasTable('school_groups')
+            ? SchoolGroup::query()->where('school_id', $school->id)->where('name', '3°B Padres QA')->first()
+            : null;
+
+        if ($admin === null || $docente === null) {
+            return;
+        }
+
+        if (Schema::hasTable('school_announcements')) {
+            SchoolAnnouncement::query()->updateOrCreate(
                 [
-                    'member_role' => 'owner',
+                    'school_id' => $school->id,
+                    'title' => 'Bienvenida al ciclo escolar QA',
+                ],
+                [
+                    'campus_id' => $school->main_campus_id,
+                    'school_class_id' => $class?->id,
+                    'created_by' => $admin->id,
+                    'type' => 'general',
+                    'body' => 'Anuncio de prueba para padres y docentes del Colegio QA.',
+                    'data' => ['seed' => 'qa'],
+                    'scheduled_at' => now()->subHour(),
                 ],
             );
         }
 
-        return $school;
+        if (Schema::hasTable('school_meetings')) {
+            $meeting = SchoolMeeting::query()->updateOrCreate(
+                [
+                    'school_id' => $school->id,
+                    'title' => 'Reunión de padres 3°B',
+                ],
+                [
+                    'campus_id' => $school->main_campus_id,
+                    'school_class_id' => $class?->id,
+                    'school_group_id' => $group?->id,
+                    'created_by' => $docente->id,
+                    'description' => 'Seguimiento académico trimestral (QA).',
+                    'starts_at' => now()->addDays(5)->setTime(17, 0),
+                    'ends_at' => now()->addDays(5)->setTime(18, 0),
+                    'location' => 'Salón 3°B',
+                    'status' => 'scheduled',
+                ],
+            );
+
+            if ($padre !== null && Schema::hasTable('school_meeting_rsvps')) {
+                SchoolMeetingRsvp::query()->updateOrCreate(
+                    [
+                        'school_meeting_id' => $meeting->id,
+                        'user_id' => $padre->id,
+                    ],
+                    [
+                        'status' => 'going',
+                    ],
+                );
+            }
+        }
+
+        if (Schema::hasTable('school_teacher_tasks')) {
+            SchoolTeacherTask::query()->updateOrCreate(
+                [
+                    'school_id' => $school->id,
+                    'title' => 'Preparar material de fracciones',
+                ],
+                [
+                    'school_group_id' => $group?->id,
+                    'created_by' => $admin->id,
+                    'assigned_to' => $docente->id,
+                    'description' => 'Tarea interna de staff QA.',
+                    'status' => 'pending',
+                    'due_date' => now()->addDays(3)->toDateString(),
+                ],
+            );
+        }
+
+        // Tarea escolar en el núcleo familiar, emitida desde el colegio
+        $hijo1 = User::query()->where('email', self::HIJO_EMAIL)->first();
+        if ($hijo1 !== null && Schema::hasTable('tasks')) {
+            Task::query()->updateOrCreate(
+                [
+                    'family_id' => $family->id,
+                    'title' => 'Tarea colegio: ciencias naturales',
+                ],
+                [
+                    'created_by' => $docente->id,
+                    'assigned_to' => $hijo1->id,
+                    'school_id' => $school->id,
+                    'created_by_role' => 'docente',
+                    'description' => 'Leer capítulo 2 y responder preguntas.',
+                    'status' => 'pending',
+                    'priority' => 'alta',
+                    'is_school' => true,
+                    'subject' => 'Ciencias',
+                    'due_date' => now()->addDays(4)->toDateString(),
+                ],
+            );
+        }
     }
 
     private function seedFreeFamily(): void
@@ -395,8 +683,45 @@ class QaUsersSeeder extends Seeder
                 'role' => 'padre',
                 'status' => 'active',
                 'joined_at' => now(),
+                'can_tasks' => true,
+                'can_finances' => true,
             ],
         );
+
+        // Un hijo para demostrar el límite Free (máx 2)
+        $child = $this->upsertUser(
+            'qa.hijo.free@zumifly.internal',
+            'Hijo Free QA',
+            'hijo',
+            familyId: $family->id,
+            documentType: 'TI',
+            documentNumber: '1001001099',
+            password: Str::random(40),
+            birthdate: '2016-02-02',
+        );
+        FamilyMember::query()->updateOrCreate(
+            ['family_id' => $family->id, 'user_id' => $child->id],
+            [
+                'role' => 'hijo',
+                'status' => 'active',
+                'joined_at' => now(),
+                'can_tasks' => false,
+                'can_finances' => false,
+            ],
+        );
+    }
+
+    /**
+     * Tutor con su propio núcleo y plan Tutor Plus (flujo planes tutores).
+     * El mismo email qa.tutor@yopmail.com sigue en la familia principal;
+     * no creamos email nuevo para no romper credenciales ya compartidas.
+     * Aquí solo documentamos que el flujo de tutor se prueba con ese miembro
+     * en Familia QA (can_tasks) y con planes en app.
+     */
+    private function seedTutorSoloFamily(): void
+    {
+        // Sin email extra: el usuario pidió los mismos. El tutor de la hub
+        // cubre join + tareas; el plan de la familia es family_plus.
     }
 
     private function seedStaffInvite(School $school): void

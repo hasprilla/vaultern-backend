@@ -49,10 +49,15 @@ final class GetDashboardAnalyticsAction
 
             $scoped = $this->taskVisibility->scopedQuery($user);
 
+            $doneStatuses = ['done', 'completed'];
+
             $tasksTotal = (clone $scoped)->where('created_at', '>=', $from)->count();
-            $tasksDone = (clone $scoped)->where('status', 'done')->where('completed_at', '>=', $from)->count();
+            $tasksDone = (clone $scoped)
+                ->whereIn('status', $doneStatuses)
+                ->where('completed_at', '>=', $from)
+                ->count();
             $tasksOverdue = (clone $scoped)
-                ->where('status', '!=', 'done')
+                ->whereNotIn('status', $doneStatuses)
                 ->where(function ($builder) {
                     $builder->where('status', 'overdue')
                         ->orWhere(function ($nested) {
@@ -84,7 +89,7 @@ final class GetDashboardAnalyticsAction
             for ($i = 6; $i >= 0; $i--) {
                 $day = now()->subDays($i)->startOfDay();
                 $count = (clone $scoped)
-                    ->where('status', 'done')
+                    ->whereIn('status', $doneStatuses)
                     ->whereDate('completed_at', $day->toDateString())
                     ->count();
                 $completedByDay[] = [

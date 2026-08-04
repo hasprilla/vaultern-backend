@@ -7,19 +7,20 @@ namespace App\Support;
 use App\Models\SubscriptionPlan;
 
 /**
- * Catálogo canónico en COP (cuenta Mercado Pago Colombia).
- * amount_cents = pesos × 100 (p. ej. 19.900 COP → 1_990_000).
+ * Catálogo canónico en COP.
  *
- * Audiencias:
- * - family: tutores / núcleos familiares (compra en /plans)
- * - school: instituciones (plan del colegio, no un “módulo”)
+ * Tres audiencias:
+ * - family: núcleos de papá/mamá (compra en /plans)
+ * - tutor: tutores / cuidadores profesionales o legales
+ * - school: instituciones (plan del colegio)
  *
- * El plan habilita techos y features. El dueño de la membresía
- * asigna qué puede hacer cada miembro dentro de ese techo.
+ * El plan es techo de funciones; el dueño define accesos por miembro.
  */
 final class SubscriptionPlanCatalog
 {
     public const AUDIENCE_FAMILY = 'family';
+
+    public const AUDIENCE_TUTOR = 'tutor';
 
     public const AUDIENCE_SCHOOL = 'school';
 
@@ -29,7 +30,7 @@ final class SubscriptionPlanCatalog
     public static function definitions(): array
     {
         return [
-            // ── Tutores / familia ──────────────────────────────────────────
+            // ── Familias ──────────────────────────────────────────────────
             [
                 'code' => 'free',
                 'name' => 'Familia Free',
@@ -48,12 +49,11 @@ final class SubscriptionPlanCatalog
                     'invite_members' => true,
                     'school_link' => true,
                     'priority_support' => false,
-                    'school_broadcast' => false,
                     'highlights' => [
+                        'Núcleo familiar básico',
                         'Hasta 2 hijos y 2 adultos',
                         '5 escaneos OCR al mes',
-                        'Tareas y finanzas básicas',
-                        'Sin reportes avanzados · con anuncios',
+                        'Sin reportes · con anuncios',
                     ],
                 ],
             ],
@@ -75,13 +75,12 @@ final class SubscriptionPlanCatalog
                     'invite_members' => true,
                     'school_link' => true,
                     'priority_support' => false,
-                    'school_broadcast' => false,
                     'highlights' => [
                         'Hasta 5 hijos y 4 adultos',
                         '60 escaneos OCR al mes',
                         'Reportes y presupuestos',
                         'Sin anuncios',
-                        'El dueño define módulos por miembro',
+                        'Dueño define módulos por miembro',
                     ],
                 ],
             ],
@@ -103,17 +102,94 @@ final class SubscriptionPlanCatalog
                     'invite_members' => true,
                     'school_link' => true,
                     'priority_support' => true,
-                    'school_broadcast' => false,
                     'highlights' => [
                         'Hasta 20 hijos y 10 adultos',
                         'OCR prácticamente ilimitado',
-                        'Reportes avanzados y seguimiento',
+                        'Reportes avanzados',
                         'Soporte prioritario',
-                        'Ideal para tutores y familias grandes',
                     ],
                 ],
             ],
-            // ── Instituciones ──────────────────────────────────────────────
+            // ── Tutores ───────────────────────────────────────────────────
+            [
+                'code' => 'tutor_free',
+                'name' => 'Tutor Free',
+                'price_monthly_cents' => 0,
+                'price_yearly_cents' => 0,
+                'sort_order' => 5,
+                'features' => [
+                    'audience' => self::AUDIENCE_TUTOR,
+                    'max_children' => 3,
+                    'max_adults' => 1,
+                    'ocr_scans_monthly' => 8,
+                    'ads' => true,
+                    'reports' => false,
+                    'tasks' => true,
+                    'finances' => false,
+                    'invite_members' => false,
+                    'school_link' => true,
+                    'priority_support' => false,
+                    'highlights' => [
+                        'Para tutores / cuidadores',
+                        'Hasta 3 alumnos a cargo',
+                        'Tareas escolares, sin finanzas del núcleo',
+                        '8 OCR/mes · con anuncios',
+                    ],
+                ],
+            ],
+            [
+                'code' => 'tutor_plus',
+                'name' => 'Tutor Plus',
+                'price_monthly_cents' => 1_490_000,
+                'price_yearly_cents' => 14_900_000,
+                'sort_order' => 6,
+                'features' => [
+                    'audience' => self::AUDIENCE_TUTOR,
+                    'max_children' => 8,
+                    'max_adults' => 2,
+                    'ocr_scans_monthly' => 80,
+                    'ads' => false,
+                    'reports' => true,
+                    'tasks' => true,
+                    'finances' => true,
+                    'invite_members' => true,
+                    'school_link' => true,
+                    'priority_support' => false,
+                    'highlights' => [
+                        'Hasta 8 alumnos a cargo',
+                        'Tareas + finanzas de seguimiento',
+                        '80 OCR/mes · sin anuncios',
+                        'Reportes de avance',
+                    ],
+                ],
+            ],
+            [
+                'code' => 'tutor_pro',
+                'name' => 'Tutor Pro',
+                'price_monthly_cents' => 2_490_000,
+                'price_yearly_cents' => 24_900_000,
+                'sort_order' => 7,
+                'features' => [
+                    'audience' => self::AUDIENCE_TUTOR,
+                    'max_children' => 30,
+                    'max_adults' => 4,
+                    'ocr_scans_monthly' => 999,
+                    'ads' => false,
+                    'reports' => true,
+                    'tasks' => true,
+                    'finances' => true,
+                    'invite_members' => true,
+                    'school_link' => true,
+                    'priority_support' => true,
+                    'highlights' => [
+                        'Hasta 30 alumnos a cargo',
+                        'OCR ilimitado y reportes',
+                        'Soporte prioritario',
+                        'Ideal para tutores multi-familia',
+                    ],
+                ],
+            ],
+            // ── Instituciones ─────────────────────────────────────────────
             [
                 'code' => 'school_trial',
                 'name' => 'Institución Prueba',
@@ -138,7 +214,6 @@ final class SubscriptionPlanCatalog
                         '14 días de prueba',
                         'Hasta 80 alumnos y 1 sede',
                         'Panel docentes y comunicación básica',
-                        'Sin psicología/salud prioritaria',
                     ],
                 ],
             ],
@@ -163,7 +238,6 @@ final class SubscriptionPlanCatalog
                     'priority_ops' => false,
                     'highlights' => [
                         'Hasta 500 alumnos y 3 sedes',
-                        'Staff y roles del colegio',
                         'Anuncios, grupos, reuniones y horarios',
                         'Panel docente incluido',
                     ],
@@ -191,8 +265,7 @@ final class SubscriptionPlanCatalog
                     'highlights' => [
                         'Hasta 5.000 alumnos y 20 sedes',
                         'Psicología y salud prioritaria',
-                        'Operación ampliada para redes escolares',
-                        'Cupos y staff premium',
+                        'Operación para redes escolares',
                     ],
                 ],
             ],
@@ -211,6 +284,16 @@ final class SubscriptionPlanCatalog
         }
 
         return $codes;
+    }
+
+    /** Planes que se compran desde la app (familia + tutor). */
+    /** @return list<string> */
+    public static function consumerPlanCodes(): array
+    {
+        return array_merge(
+            self::codesForAudience(self::AUDIENCE_FAMILY),
+            self::codesForAudience(self::AUDIENCE_TUTOR),
+        );
     }
 
     /** @return array<string, mixed>|null */
@@ -236,7 +319,6 @@ final class SubscriptionPlanCatalog
         return (string) (self::definitionFor($code)['name'] ?? $code);
     }
 
-    /** Upsert planes activos (idempotente). Fuerza COP para MP Colombia. */
     public static function ensureSeeded(): void
     {
         foreach (self::definitions() as $plan) {
