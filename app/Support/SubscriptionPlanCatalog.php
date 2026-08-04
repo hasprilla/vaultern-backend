@@ -32,7 +32,7 @@ final class SubscriptionPlanCatalog
             // ── Tutores / familia ──────────────────────────────────────────
             [
                 'code' => 'free',
-                'name' => 'Free',
+                'name' => 'Familia Free',
                 'price_monthly_cents' => 0,
                 'price_yearly_cents' => 0,
                 'sort_order' => 0,
@@ -53,13 +53,13 @@ final class SubscriptionPlanCatalog
                         'Hasta 2 hijos y 2 adultos',
                         '5 escaneos OCR al mes',
                         'Tareas y finanzas básicas',
-                        'Con anuncios',
+                        'Sin reportes avanzados · con anuncios',
                     ],
                 ],
             ],
             [
                 'code' => 'family_plus',
-                'name' => 'Tutores Plus',
+                'name' => 'Familia Plus',
                 'price_monthly_cents' => 1_990_000,
                 'price_yearly_cents' => 19_900_000,
                 'sort_order' => 1,
@@ -87,7 +87,7 @@ final class SubscriptionPlanCatalog
             ],
             [
                 'code' => 'family_pro',
-                'name' => 'Tutores Pro',
+                'name' => 'Familia Pro',
                 'price_monthly_cents' => 2_990_000,
                 'price_yearly_cents' => 29_900_000,
                 'sort_order' => 2,
@@ -109,7 +109,7 @@ final class SubscriptionPlanCatalog
                         'OCR prácticamente ilimitado',
                         'Reportes avanzados y seguimiento',
                         'Soporte prioritario',
-                        'Ideal para tutores con varios núcleos',
+                        'Ideal para tutores y familias grandes',
                     ],
                 ],
             ],

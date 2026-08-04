@@ -32,7 +32,39 @@ final class GetFamilyDetailsQuery
      */
     public function execute(User $viewer): array
     {
-        $family = Family::query()->findOrFail($viewer->family_id);
+        if ($viewer->family_id === null || $viewer->family_id === '') {
+            return [
+                'id' => null,
+                'name' => null,
+                'plan' => 'free',
+                'invite_code' => null,
+                'owner_user_id' => null,
+                'is_owner' => false,
+                'viewer_user_id' => (string) $viewer->id,
+                'members' => [],
+                'my_child_ids' => [],
+                'has_family' => false,
+                'empty_reason' => 'no_family',
+            ];
+        }
+
+        $family = Family::query()->find($viewer->family_id);
+        if ($family === null) {
+            return [
+                'id' => null,
+                'name' => null,
+                'plan' => 'free',
+                'invite_code' => null,
+                'owner_user_id' => null,
+                'is_owner' => false,
+                'viewer_user_id' => (string) $viewer->id,
+                'members' => [],
+                'my_child_ids' => [],
+                'has_family' => false,
+                'empty_reason' => 'family_missing',
+            ];
+        }
+
         $family->refresh();
 
         // Si la columna está vacía, auto-asignar al primer padre/madre (suele ser quien creó la cuenta).
@@ -122,6 +154,7 @@ final class GetFamilyDetailsQuery
                 return $payload;
             })->all(),
             'my_child_ids' => array_map('strval', $myChildIds),
+            'has_family' => true,
         ];
     }
 }
