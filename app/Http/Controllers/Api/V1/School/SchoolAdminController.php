@@ -67,7 +67,7 @@ class SchoolAdminController extends Controller
                 'id' => (string) Str::uuid(),
                 'name' => $validated['name'],
                 'city' => $validated['city'] ?? null,
-                'plan' => 'school',
+                'plan' => 'school_trial',
                 'created_by' => $user->id,
                 'is_active' => true,
             ]);
@@ -97,9 +97,10 @@ class SchoolAdminController extends Controller
             $subscription = SchoolSubscription::query()->create([
                 'id' => (string) Str::uuid(),
                 'school_id' => $school->id,
-                'plan_code' => 'school',
-                'status' => 'active',
+                'plan_code' => 'school_trial',
+                'status' => 'trialing',
                 'billing' => 'monthly',
+                'current_period_end' => now()->addDays(14),
             ]);
 
             $user->update(['role' => 'admin_escuela']);
@@ -128,6 +129,80 @@ class SchoolAdminController extends Controller
             ->get();
 
         return response()->json(['data' => $campuses]);
+    }
+
+    public function listClasses(Request $request, School $school): JsonResponse
+    {
+        if (! $this->assertBelongsToSchool($request->user(), $school)) {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
+        $classes = SchoolClass::query()
+            ->with(['teacher:id,name,email', 'campus:id,name'])
+            ->withCount(['enrollments' => static fn ($q) => $q->where('status', 'active')])
+            ->where('school_id', $school->id)
+            ->orderBy('school_year', 'desc')
+            ->orderBy('name')
+            ->get();
+
+        return response()->json(['data' => $classes]);
+    }
+
+    public function storeClass(Request $request, School $school): JsonResponse
+    {
+        if (! $this->assertManagesSchool($request->user(), $school)) {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'min:1', 'max:120'],
+            'grade' => ['nullable', 'string', 'max:32'],
+            'section' => ['nullable', 'string', 'max:32'],
+            'school_year' => ['nullable', 'string', 'max:16'],
+            'campus_id' => ['nullable', 'uuid', Rule::exists('school_campuses', 'id')->where('school_id', $school->id)],
+            'teacher_user_id' => ['nullable', 'integer', 'exists:users,id'],
+        ]);
+
+        $class = SchoolClass::query()->create([
+            'id' => (string) Str::uuid(),
+            'school_id' => $school->id,
+            'name' => $validated['name'],
+            'grade' => $validated['grade'] ?? null,
+            'section' => $validated['section'] ?? null,
+            'school_year' => $validated['school_year'] ?? (string) now()->year,
+            'campus_id' => $validated['campus_id'] ?? null,
+            'teacher_user_id' => $validated['teacher_user_id'] ?? null,
+        ]);
+
+        $class->load(['teacher:id,name,email', 'campus:id,name']);
+        $class->loadCount(['enrollments' => static fn ($q) => $q->where('status', 'active')]);
+
+        return response()->json(['data' => $class], 201);
+    }
+
+    public function listStudents(Request $request, School $school): JsonResponse
+    {
+        if (! $this->assertBelongsToSchool($request->user(), $school)) {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
+        $classId = $request->query('school_class_id');
+
+        $query = ClassEnrollment::query()
+            ->with([
+                'student:id,name,email,document_type,document_number,phone,family_id',
+                'schoolClass:id,name,grade,section,school_year',
+            ])
+            ->where('status', 'active')
+            ->whereHas('schoolClass', static fn ($q) => $q->where('school_id', $school->id));
+
+        if (is_string($classId) && $classId !== '') {
+            $query->where('school_class_id', $classId);
+        }
+
+        $rows = $query->orderByDesc('created_at')->limit(500)->get();
+
+        return response()->json(['data' => $rows]);
     }
 
     public function storeCampus(Request $request, School $school): JsonResponse
@@ -1277,12 +1352,11 @@ class SchoolAdminController extends Controller
         );
 
         return response()->json([
-            'data' => [
-                ...$subscription->toArray(),
-                'can_manage' => $this->assertManagesSchool($request->user(), $school),
-                'label' => $this->subscriptionLabel($subscription->plan_code),
-                'features' => $this->subscriptionFeatures($subscription->plan_code),
-            ],
+            'data' => $this->schoolSubscriptionPayload(
+                $subscription,
+                $school,
+                canManage: $this->assertManagesSchool($request->user(), $school),
+            ),
         ]);
     }
 
@@ -1292,8 +1366,12 @@ class SchoolAdminController extends Controller
             return response()->json(['message' => 'Forbidden'], 403);
         }
 
+        $schoolCodes = \App\Support\SubscriptionPlanCatalog::codesForAudience(
+            \App\Support\SubscriptionPlanCatalog::AUDIENCE_SCHOOL,
+        );
+
         $validated = $request->validate([
-            'plan_code' => ['sometimes', Rule::in(['school', 'school_trial', 'school_pro'])],
+            'plan_code' => ['sometimes', Rule::in($schoolCodes)],
             'status' => ['sometimes', Rule::in(['active', 'trialing', 'past_due', 'canceled', 'inactive'])],
             'billing' => ['sometimes', Rule::in(['monthly', 'yearly'])],
             'renew_months' => ['sometimes', 'integer', 'min:1', 'max:24'],
@@ -1303,8 +1381,8 @@ class SchoolAdminController extends Controller
             ['school_id' => $school->id],
             [
                 'id' => (string) Str::uuid(),
-                'plan_code' => 'school',
-                'status' => 'active',
+                'plan_code' => 'school_trial',
+                'status' => 'trialing',
                 'billing' => 'monthly',
             ],
         );
@@ -1312,6 +1390,11 @@ class SchoolAdminController extends Controller
         if (isset($validated['plan_code'])) {
             $subscription->plan_code = $validated['plan_code'];
             $school->forceFill(['plan' => $validated['plan_code']])->save();
+            if ($validated['plan_code'] === 'school_trial') {
+                $subscription->status = 'trialing';
+            } elseif (in_array($subscription->status, ['inactive', 'canceled', 'trialing'], true)) {
+                $subscription->status = 'active';
+            }
         }
         if (isset($validated['status'])) {
             $subscription->status = $validated['status'];
@@ -1324,19 +1407,55 @@ class SchoolAdminController extends Controller
                 ? $subscription->current_period_end
                 : now();
             $subscription->current_period_end = $base->copy()->addMonths((int) $validated['renew_months']);
-            $subscription->status = 'active';
+            if ($subscription->status !== 'trialing') {
+                $subscription->status = 'active';
+            }
         }
 
         $subscription->save();
 
         return response()->json([
-            'data' => [
-                ...$subscription->fresh()->toArray(),
-                'can_manage' => true,
-                'label' => $this->subscriptionLabel($subscription->plan_code),
-                'features' => $this->subscriptionFeatures($subscription->plan_code),
-            ],
+            'data' => $this->schoolSubscriptionPayload($subscription->fresh(), $school, canManage: true),
         ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function schoolSubscriptionPayload(
+        SchoolSubscription $subscription,
+        School $school,
+        bool $canManage,
+    ): array {
+        \App\Support\SubscriptionPlanCatalog::ensureSeeded();
+        $planCode = (string) $subscription->plan_code;
+        $featuresMap = \App\Support\SubscriptionPlanCatalog::featuresFor($planCode);
+        $available = [];
+        foreach (\App\Support\SubscriptionPlanCatalog::codesForAudience(
+            \App\Support\SubscriptionPlanCatalog::AUDIENCE_SCHOOL,
+        ) as $code) {
+            $def = \App\Support\SubscriptionPlanCatalog::definitionFor($code);
+            if ($def === null) {
+                continue;
+            }
+            $available[] = [
+                'code' => $code,
+                'name' => $def['name'],
+                'price_monthly_cents' => $def['price_monthly_cents'],
+                'price_yearly_cents' => $def['price_yearly_cents'],
+                'features' => $def['features'],
+                'highlights' => $def['features']['highlights'] ?? [],
+            ];
+        }
+
+        return [
+            ...$subscription->toArray(),
+            'can_manage' => $canManage,
+            'label' => \App\Support\SubscriptionPlanCatalog::labelFor($planCode),
+            'features' => $this->subscriptionFeatures($planCode),
+            'feature_flags' => $featuresMap,
+            'available_plans' => $available,
+        ];
     }
 
     public function overview(Request $request, School $school): JsonResponse
@@ -1400,32 +1519,26 @@ class SchoolAdminController extends Controller
 
     private function subscriptionLabel(string $planCode): string
     {
-        return match ($planCode) {
-            'school_pro' => 'Escuela Pro',
-            'school_trial' => 'Prueba escolar',
-            default => 'Escuela',
-        };
+        return \App\Support\SubscriptionPlanCatalog::labelFor($planCode);
     }
 
     /** @return list<string> */
     private function subscriptionFeatures(string $planCode): array
     {
-        $base = [
+        $highlights = \App\Support\SubscriptionPlanCatalog::featuresFor($planCode)['highlights'] ?? null;
+        if (is_array($highlights) && $highlights !== []) {
+            return array_values(array_filter(array_map(
+                static fn ($item) => is_string($item) ? $item : null,
+                $highlights,
+            )));
+        }
+
+        return [
             'Panel admin y docentes',
             'Sedes y grupos',
             'Comunicación a familias',
             'Reuniones y horarios',
         ];
-
-        if ($planCode === 'school_pro') {
-            return [...$base, 'Cupos ampliados', 'Seguimiento psicologia/salud prioritario'];
-        }
-
-        if ($planCode === 'school_trial') {
-            return [...$base, 'Vigencia de prueba limitada'];
-        }
-
-        return $base;
     }
 
     /**

@@ -32,7 +32,8 @@ class RegisterRequest extends FormRequest
                 },
             ],
             'password'   => ['required', 'string', 'min:8'],
-            'role'       => ['required', 'string', \Illuminate\Validation\Rule::in(['padre', 'madre'])],
+            // Solo dueños de núcleo familiar al crear cuenta. Staff de colegio: invitación tras registro.
+            'role'       => ['required', 'string', \Illuminate\Validation\Rule::in(['padre', 'madre', 'tutor'])],
             'device_id'  => ['nullable', 'string', 'max:255'],
             'platform'   => ['nullable', 'string', 'max:32'],
             'fcm_token'  => ['nullable', 'string', 'max:512'],

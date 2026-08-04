@@ -51,10 +51,11 @@ class SubscriptionController extends Controller
     {
         SubscriptionPlanCatalog::ensureSeeded();
 
-        $plans = Cache::remember('subscription_plans.active.v1', 300, static function () {
+        // Solo planes de tutores/familia (la institución tiene su propio plan).
+        $plans = Cache::remember('subscription_plans.active.family.v2', 300, static function () {
             return SubscriptionPlan::query()
                 ->where('is_active', true)
-                ->whereNotIn('code', ['school'])
+                ->whereIn('code', SubscriptionPlanCatalog::codesForAudience(SubscriptionPlanCatalog::AUDIENCE_FAMILY))
                 ->orderBy('sort_order')
                 ->get();
         });

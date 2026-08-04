@@ -304,6 +304,14 @@ class User extends Authenticatable
 
     public function canManageFinances(): bool
     {
+        if ($this->isPlatformAdmin()) {
+            return true;
+        }
+        // Techo del plan familiar; el dueño puede bajar permisos por miembro.
+        if (! $this->familyPlanAllowsModule('finances')) {
+            return false;
+        }
+
         $override = $this->modulePermissionOverride('can_finances');
         if ($override !== null) {
             return $override;
@@ -314,12 +322,37 @@ class User extends Authenticatable
 
     public function canManageTasks(): bool
     {
+        if ($this->isPlatformAdmin()) {
+            return true;
+        }
+        if (! $this->familyPlanAllowsModule('tasks')) {
+            return false;
+        }
+
         $override = $this->modulePermissionOverride('can_tasks');
         if ($override !== null) {
             return $override;
         }
 
         return $this->familyRole()->canManageTasks();
+    }
+
+    /** El plan comprado habilita el módulo; sin familia no hay módulos familiares. */
+    private function familyPlanAllowsModule(string $module): bool
+    {
+        if ($this->family_id === null) {
+            return false;
+        }
+
+        $family = $this->relationLoaded('family')
+            ? $this->family
+            : Family::query()->find($this->family_id);
+
+        if ($family === null) {
+            return false;
+        }
+
+        return app(\App\Services\PlanFeatureService::class)->familyAllowsModule($family, $module);
     }
 
     /** Override de módulo en family_members (null = usar rol). */

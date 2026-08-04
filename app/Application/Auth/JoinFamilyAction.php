@@ -53,7 +53,7 @@ final class JoinFamilyAction
         if ($inviter === null || (string) $inviter->family_id !== (string) $family->id) {
             $inviter = User::query()
                 ->where('family_id', $family->id)
-                ->whereIn('role', ['padre', 'madre'])
+                ->whereIn('role', ['padre', 'madre', 'tutor'])
                 ->orderBy('id')
                 ->first();
         }
@@ -78,7 +78,7 @@ final class JoinFamilyAction
 
         $parentIds = User::query()
             ->where('family_id', $family->id)
-            ->whereIn('role', ['padre', 'madre'])
+            ->whereIn('role', ['padre', 'madre', 'tutor'])
             ->pluck('id')
             ->all();
 

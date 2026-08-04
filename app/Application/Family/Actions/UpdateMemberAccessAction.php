@@ -8,6 +8,7 @@ use App\Models\Family;
 use App\Models\FamilyMember;
 use App\Models\User;
 use App\Services\FamilyNotificationService;
+use App\Services\PlanFeatureService;
 use App\Support\FamilyOwnership;
 use App\Support\FamilyRealtime;
 use App\Support\SchemaCompat;
@@ -24,6 +25,7 @@ final class UpdateMemberAccessAction
     public function __construct(
         private readonly FamilyNotificationService $notifications,
         private readonly SyncParentChildAccessAction $syncChildAccess,
+        private readonly PlanFeatureService $planFeatures,
     ) {}
 
     /**
@@ -89,6 +91,24 @@ final class UpdateMemberAccessAction
         $canFinances = array_key_exists('can_finances', $validated)
             ? (bool) $validated['can_finances']
             : $this->defaultFinances($role);
+
+        // El plan familiar es el techo; el dueño solo distribuye dentro de lo comprado.
+        $planAllowsTasks = $this->planFeatures->familyAllowsModule($family, 'tasks');
+        $planAllowsFinances = $this->planFeatures->familyAllowsModule($family, 'finances');
+        if ($canTasks && ! $planAllowsTasks) {
+            return [
+                'ok' => false,
+                'status' => 422,
+                'message' => 'Tu plan no incluye el módulo de tareas. Mejora el plan de la familia.',
+            ];
+        }
+        if ($canFinances && ! $planAllowsFinances) {
+            return [
+                'ok' => false,
+                'status' => 422,
+                'message' => 'Tu plan no incluye el módulo de finanzas. Mejora el plan de la familia.',
+            ];
+        }
 
         if ($role === 'hijo') {
             $canTasks = false;

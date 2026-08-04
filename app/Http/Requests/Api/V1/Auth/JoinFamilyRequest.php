@@ -23,7 +23,7 @@ class JoinFamilyRequest extends FormRequest
             'password'    => ['required', 'string', 'min:8'],
             'invite_code' => ['required', 'string', 'size:8'],
             'invited_by'  => ['nullable', 'integer', 'exists:users,id'],
-            'role'        => ['required', 'string', Rule::in(['padre', 'madre'])],
+            'role'        => ['required', 'string', Rule::in(['padre', 'madre', 'tutor'])],
         ], PersonIdentity::rules(documentRequired: true));
     }
 

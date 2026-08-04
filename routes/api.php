@@ -193,6 +193,9 @@ Route::prefix('v1')->middleware(['api.auth', 'device.recovery', 'tenant'])->grou
     Route::get('/school/admin/{school}/campuses', [SchoolAdminController::class, 'listCampuses']);
     Route::post('/school/admin/{school}/campuses', [SchoolAdminController::class, 'storeCampus']);
     Route::patch('/school/admin/{school}/campuses/{campus}', [SchoolAdminController::class, 'updateCampus']);
+    Route::get('/school/admin/{school}/classes', [SchoolAdminController::class, 'listClasses']);
+    Route::post('/school/admin/{school}/classes', [SchoolAdminController::class, 'storeClass']);
+    Route::get('/school/admin/{school}/students', [SchoolAdminController::class, 'listStudents']);
     Route::post('/school/admin/{school}/staff/invite', [SchoolAdminController::class, 'inviteStaff']);
     Route::get('/school/admin/{school}/staff', [SchoolAdminController::class, 'listStaff']);
     Route::get('/school/admin/{school}/staff/invites', [SchoolAdminController::class, 'listStaffInvites']);
