@@ -26,6 +26,8 @@ class User extends Authenticatable
         'password',
         'family_id',
         'role',
+        'document_type',
+        'document_number',
         'avatar',
         'mfa_enabled',
         'mfa_secret',

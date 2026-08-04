@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class SchoolClass extends Model
+class SchoolCampus extends Model
 {
     use HasUuids;
 
@@ -19,22 +19,31 @@ class SchoolClass extends Model
 
     protected $fillable = [
         'school_id',
-        'campus_id',
         'name',
-        'grade',
-        'section',
-        'school_year',
-        'teacher_user_id',
+        'code',
+        'city',
+        'address',
+        'is_main',
+        'is_active',
     ];
 
+    protected function casts(): array
+    {
+        return [
+            'is_main' => 'boolean',
+            'is_active' => 'boolean',
+        ];
+    }
+
+    /** @return BelongsTo<School, $this> */
     public function school(): BelongsTo
     {
         return $this->belongsTo(School::class);
     }
 
-    /** @return HasMany<ClassEnrollment> */
-    public function enrollments(): HasMany
+    /** @return HasMany<SchoolClass> */
+    public function classes(): HasMany
     {
-        return $this->hasMany(ClassEnrollment::class);
+        return $this->hasMany(SchoolClass::class, 'campus_id');
     }
 }

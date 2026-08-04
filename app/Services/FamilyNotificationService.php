@@ -158,6 +158,55 @@ class FamilyNotificationService
     }
 
     /**
+     * Notifica usuarios que pueden pertenecer a distintas familias
+     * (p.ej. padres de alumnos notificados por staff escolar sin family_id).
+     *
+     * @param  array<int|string>  $recipientIds
+     * @param  array<string, mixed>  $data
+     */
+    public function notifyUsersAcrossFamilies(
+        ?int $excludeUserId,
+        array $recipientIds,
+        string $type,
+        string $title,
+        string $body,
+        array $data = [],
+    ): void {
+        $ids = array_values(array_unique(array_map('intval', $recipientIds)));
+        if ($excludeUserId !== null) {
+            $ids = array_values(array_filter($ids, fn (int $id) => $id !== $excludeUserId));
+        }
+
+        if ($ids === []) {
+            return;
+        }
+
+        /** @var array<string, list<int>> $byFamily */
+        $byFamily = [];
+        $users = User::query()
+            ->whereIn('id', $ids)
+            ->whereNotNull('family_id')
+            ->get(['id', 'family_id']);
+
+        foreach ($users as $user) {
+            $familyId = (string) $user->family_id;
+            $byFamily[$familyId][] = (int) $user->id;
+        }
+
+        foreach ($byFamily as $familyId => $familyRecipientIds) {
+            $this->notifyFamilyById(
+                $familyId,
+                $excludeUserId,
+                $type,
+                $title,
+                $body,
+                $data,
+                $familyRecipientIds,
+            );
+        }
+    }
+
+    /**
      * @param  array<int|string>  $recipientIds
      * @param  array<string, mixed>  $data
      */

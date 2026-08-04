@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\V1\Finance\FinanceController;
 use App\Http\Controllers\Api\V1\Notification\NotificationController;
 use App\Http\Controllers\Api\V1\Ocr\OcrController;
 use App\Http\Controllers\Api\V1\Profile\ProfileController;
+use App\Http\Controllers\Api\V1\School\SchoolAdminController;
 use App\Http\Controllers\Api\V1\School\SchoolBroadcastController;
 use App\Http\Controllers\Api\V1\School\SchoolEnrollmentController;
 use App\Http\Controllers\Api\V1\Subscription\SubscriptionController;
@@ -183,4 +184,40 @@ Route::prefix('v1')->middleware(['api.auth', 'device.recovery', 'tenant'])->grou
     Route::get('/school/broadcasts', [SchoolBroadcastController::class, 'index']);
     Route::post('/school/broadcasts', [SchoolBroadcastController::class, 'store']);
     Route::get('/school/broadcasts/{broadcast}', [SchoolBroadcastController::class, 'show']);
+
+    Route::post('/school/admin/register', [SchoolAdminController::class, 'registerInstitution']);
+    Route::post('/school/staff/accept-invite', [SchoolAdminController::class, 'acceptStaffInvite']);
+    Route::post('/school/students/document', [SchoolAdminController::class, 'updateStudentDocument']);
+
+    Route::get('/school/admin/{school}/overview', [SchoolAdminController::class, 'overview']);
+    Route::get('/school/admin/{school}/campuses', [SchoolAdminController::class, 'listCampuses']);
+    Route::post('/school/admin/{school}/campuses', [SchoolAdminController::class, 'storeCampus']);
+    Route::patch('/school/admin/{school}/campuses/{campus}', [SchoolAdminController::class, 'updateCampus']);
+    Route::post('/school/admin/{school}/staff/invite', [SchoolAdminController::class, 'inviteStaff']);
+    Route::get('/school/admin/{school}/staff', [SchoolAdminController::class, 'listStaff']);
+    Route::get('/school/admin/{school}/students/lookup', [SchoolAdminController::class, 'lookupStudentByDocument']);
+    Route::post('/school/admin/{school}/students/enroll', [SchoolAdminController::class, 'enrollByDocument']);
+    Route::get('/school/admin/{school}/groups', [SchoolAdminController::class, 'listGroups']);
+    Route::post('/school/admin/{school}/groups', [SchoolAdminController::class, 'storeGroup']);
+    Route::put('/school/admin/{school}/groups/{group}/members', [SchoolAdminController::class, 'syncGroupMembers']);
+    Route::post('/school/admin/{school}/announce', [SchoolAdminController::class, 'announce']);
+    Route::post('/school/admin/{school}/meetings', [SchoolAdminController::class, 'storeMeeting']);
+    Route::get('/school/admin/{school}/meetings', [SchoolAdminController::class, 'listMeetings']);
+    Route::post('/school/admin/{school}/schedules', [SchoolAdminController::class, 'storeSchedule']);
+    Route::get('/school/admin/{school}/schedules', [SchoolAdminController::class, 'listSchedules']);
+    Route::post('/school/admin/{school}/report-sick', [SchoolAdminController::class, 'reportSick']);
+    Route::post('/school/admin/{school}/cite-parents', [SchoolAdminController::class, 'citeParents']);
+    Route::post('/school/admin/{school}/teacher-tasks', [SchoolAdminController::class, 'storeTeacherTask']);
+    Route::get('/school/admin/{school}/teacher-tasks', [SchoolAdminController::class, 'listTeacherTasks']);
+    Route::post('/school/admin/{school}/psych-cases', [SchoolAdminController::class, 'storePsychCase']);
+    Route::get('/school/admin/{school}/psych-cases', [SchoolAdminController::class, 'listPsychCases']);
+    Route::post('/school/admin/{school}/health-alerts', [SchoolAdminController::class, 'storeHealthAlert']);
+    Route::get('/school/admin/{school}/health-alerts', [SchoolAdminController::class, 'listHealthAlerts']);
+    Route::get('/school/admin/{school}/subscription', [SchoolAdminController::class, 'schoolSubscription']);
+
+    Route::post('/school/meetings/{meeting}/rsvp', [SchoolAdminController::class, 'respondMeeting']);
+    Route::patch('/school/schedules/{schedule}', [SchoolAdminController::class, 'updateSchedule']);
+    Route::post('/school/schedules/{schedule}/share', [SchoolAdminController::class, 'shareSchedule']);
+    Route::patch('/school/teacher-tasks/{task}', [SchoolAdminController::class, 'updateTeacherTask']);
+    Route::post('/school/psych-cases/{case}/notes', [SchoolAdminController::class, 'addPsychNote']);
 });

@@ -80,10 +80,10 @@ class ChildGuardianService
             return $this->allChildIdsInFamily($parent->family_id);
         }
 
-        // Solo custodios explícitos (el dueño no ve datos de hijos ajenos
-        // salvo que también esté como custodio).
+        // Solo custodios explícitos del núcleo activo (evita mezcla multi-familia).
         return ChildGuardian::query()
             ->where('parent_user_id', $parent->id)
+            ->where('family_id', $parent->family_id)
             ->pluck('child_user_id')
             ->map(fn ($id) => (int) $id)
             ->all();
@@ -129,6 +129,7 @@ class ChildGuardianService
         return ChildGuardian::query()
             ->where('parent_user_id', $parent->id)
             ->where('child_user_id', $childId)
+            ->where('family_id', $parent->family_id)
             ->exists();
     }
 

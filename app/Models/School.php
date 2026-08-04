@@ -6,7 +6,9 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Str;
 
 class School extends Model
@@ -22,6 +24,8 @@ class School extends Model
         'code',
         'plan',
         'city',
+        'main_campus_id',
+        'created_by',
         'is_active',
     ];
 
@@ -51,5 +55,29 @@ class School extends Model
     public function teachers(): HasMany
     {
         return $this->hasMany(TeacherMembership::class);
+    }
+
+    /** @return HasMany<SchoolCampus> */
+    public function campuses(): HasMany
+    {
+        return $this->hasMany(SchoolCampus::class);
+    }
+
+    /** @return BelongsTo<SchoolCampus, $this> */
+    public function mainCampus(): BelongsTo
+    {
+        return $this->belongsTo(SchoolCampus::class, 'main_campus_id');
+    }
+
+    /** @return HasOne<SchoolSubscription> */
+    public function subscription(): HasOne
+    {
+        return $this->hasOne(SchoolSubscription::class);
+    }
+
+    /** @return HasMany<SchoolGroup> */
+    public function groups(): HasMany
+    {
+        return $this->hasMany(SchoolGroup::class);
     }
 }
