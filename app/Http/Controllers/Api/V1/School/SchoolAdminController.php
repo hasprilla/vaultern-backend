@@ -4,9 +4,13 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1\School;
 
+use App\Application\School\Actions\StoreSchoolScheduleAction;
 use App\Application\School\Actions\SyncSchoolGroupMembersAction;
+use App\Application\School\Actions\UpdateSchoolScheduleAction;
 use App\Application\School\Queries\ListMySchoolMeetingsQuery;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\School\StoreSchoolScheduleRequest;
+use App\Http\Requests\School\UpdateSchoolScheduleRequest;
 use App\Models\ClassEnrollment;
 use App\Models\School;
 use App\Models\SchoolAnnouncement;
@@ -915,60 +919,34 @@ class SchoolAdminController extends Controller
         return response()->json(['data' => $meetings]);
     }
 
-    public function storeSchedule(Request $request, School $school): JsonResponse
-    {
+    public function storeSchedule(
+        StoreSchoolScheduleRequest $request,
+        School $school,
+        StoreSchoolScheduleAction $action,
+    ): JsonResponse {
         if (! $this->assertBelongsToSchool($request->user(), $school)) {
             return response()->json(['message' => 'Forbidden'], 403);
         }
 
-        $validated = $request->validate([
-            'title' => ['required', 'string', 'max:255'],
-            'slots' => ['required', 'array', 'min:1'],
-            'slots.*.day' => ['required'],
-            'slots.*.start' => ['required', 'string'],
-            'slots.*.end' => ['required', 'string'],
-            'slots.*.subject' => ['nullable', 'string', 'max:120'],
-            'campus_id' => ['nullable', 'uuid', Rule::exists('school_campuses', 'id')->where('school_id', $school->id)],
-            'school_class_id' => ['nullable', 'uuid', Rule::exists('school_classes', 'id')->where('school_id', $school->id)],
-        ]);
-
-        $schedule = SchoolSchedule::query()->create([
-            'id' => (string) Str::uuid(),
-            'school_id' => $school->id,
-            'campus_id' => $validated['campus_id'] ?? null,
-            'school_class_id' => $validated['school_class_id'] ?? null,
-            'title' => $validated['title'],
-            'slots' => $validated['slots'],
-            'created_by' => $request->user()->id,
-            'is_active' => true,
-        ]);
+        $schedule = $action->handle($school, $request->user(), $request->validated());
 
         return response()->json(['data' => $schedule], 201);
     }
 
-    public function updateSchedule(Request $request, SchoolSchedule $schedule): JsonResponse
-    {
+    public function updateSchedule(
+        UpdateSchoolScheduleRequest $request,
+        SchoolSchedule $schedule,
+        UpdateSchoolScheduleAction $action,
+    ): JsonResponse {
         $user = $request->user();
 
         if ((int) $schedule->created_by !== (int) $user->id) {
             return response()->json(['message' => 'Solo el creador puede editar este horario'], 403);
         }
 
-        $validated = $request->validate([
-            'title' => ['sometimes', 'string', 'max:255'],
-            'slots' => ['sometimes', 'array', 'min:1'],
-            'slots.*.day' => ['required'],
-            'slots.*.start' => ['required', 'string'],
-            'slots.*.end' => ['required', 'string'],
-            'slots.*.subject' => ['nullable', 'string', 'max:120'],
-            'campus_id' => ['nullable', 'uuid'],
-            'school_class_id' => ['nullable', 'uuid'],
-            'is_active' => ['nullable', 'boolean'],
+        return response()->json([
+            'data' => $action->handle($schedule, $request->validated()),
         ]);
-
-        $schedule->update($validated);
-
-        return response()->json(['data' => $schedule->fresh()]);
     }
 
     public function shareSchedule(Request $request, SchoolSchedule $schedule): JsonResponse

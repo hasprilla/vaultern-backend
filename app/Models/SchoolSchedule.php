@@ -23,6 +23,7 @@ class SchoolSchedule extends Model
         'school_class_id',
         'title',
         'slots',
+        'exceptions',
         'created_by',
         'is_active',
     ];
@@ -31,6 +32,7 @@ class SchoolSchedule extends Model
     {
         return [
             'slots' => 'array',
+            'exceptions' => 'array',
             'is_active' => 'boolean',
         ];
     }

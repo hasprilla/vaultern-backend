@@ -19,6 +19,7 @@ use App\Http\Controllers\Api\V1\Finance\FinanceController;
 use App\Http\Controllers\Api\V1\Notification\NotificationController;
 use App\Http\Controllers\Api\V1\Ocr\OcrController;
 use App\Http\Controllers\Api\V1\Profile\ProfileController;
+use App\Http\Controllers\Api\V1\School\CurriculumController;
 use App\Http\Controllers\Api\V1\School\SchoolAdminController;
 use App\Http\Controllers\Api\V1\School\SchoolAttendanceController;
 use App\Http\Controllers\Api\V1\School\SchoolBroadcastController;
@@ -244,6 +245,8 @@ Route::prefix('v1')->middleware(['api.auth', 'device.recovery', 'tenant'])->grou
     Route::post('/school/admin/{school}/announce', [SchoolAdminController::class, 'announce']);
     Route::post('/school/admin/{school}/meetings', [SchoolAdminController::class, 'storeMeeting']);
     Route::get('/school/admin/{school}/meetings', [SchoolAdminController::class, 'listMeetings']);
+    Route::get('/school/curriculum/profiles', [CurriculumController::class, 'profiles']);
+    Route::get('/school/curriculum/template', [CurriculumController::class, 'template']);
     Route::post('/school/admin/{school}/schedules', [SchoolAdminController::class, 'storeSchedule']);
     Route::get('/school/admin/{school}/schedules', [SchoolAdminController::class, 'listSchedules']);
     Route::post('/school/admin/{school}/report-sick', [SchoolAdminController::class, 'reportSick']);
