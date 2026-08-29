@@ -46,6 +46,12 @@ class SchoolGroup extends Model
         return $this->hasMany(SchoolGroupMember::class);
     }
 
+    /** @return HasMany<SchoolGroupMember> */
+    public function activeMembers(): HasMany
+    {
+        return $this->members()->where('status', 'active');
+    }
+
     /** @return BelongsTo<User, $this> */
     public function creator(): BelongsTo
     {

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1\School;
 
+use App\Application\School\Actions\SyncSchoolGroupMembersAction;
 use App\Application\School\Queries\ListMySchoolMeetingsQuery;
 use App\Http\Controllers\Controller;
 use App\Models\ClassEnrollment;
@@ -604,7 +605,7 @@ class SchoolAdminController extends Controller
 
         $groups = SchoolGroup::query()
             ->with(['members.user:id,name,email,role'])
-            ->withCount('members')
+            ->withCount(['activeMembers as members_count'])
             ->where('school_id', $school->id)
             ->where('is_active', true)
             ->orderBy('name')
@@ -626,6 +627,11 @@ class SchoolAdminController extends Controller
             'description' => ['nullable', 'string', 'max:2000'],
             'member_ids' => ['nullable', 'array'],
             'member_ids.*' => ['integer', 'exists:users,id'],
+            'school_class_id' => [
+                'nullable',
+                'uuid',
+                Rule::exists('school_classes', 'id')->where('school_id', $school->id),
+            ],
         ]);
 
         $group = DB::transaction(function () use ($request, $school, $validated) {
@@ -640,12 +646,22 @@ class SchoolAdminController extends Controller
                 'is_active' => true,
             ]);
 
-            foreach ($validated['member_ids'] ?? [] as $memberId) {
+            $memberIds = $validated['member_ids'] ?? [];
+            if ($memberIds === [] && ! empty($validated['school_class_id'])) {
+                $memberIds = ClassEnrollment::query()
+                    ->where('school_class_id', $validated['school_class_id'])
+                    ->where('status', 'active')
+                    ->pluck('student_user_id')
+                    ->all();
+            }
+
+            foreach ($memberIds as $memberId) {
                 SchoolGroupMember::query()->create([
                     'id' => (string) Str::uuid(),
                     'school_group_id' => $group->id,
-                    'user_id' => $memberId,
+                    'user_id' => (int) $memberId,
                     'member_role' => 'member',
+                    'status' => 'active',
                 ]);
             }
 
@@ -657,8 +673,12 @@ class SchoolAdminController extends Controller
         return response()->json(['data' => $group], 201);
     }
 
-    public function syncGroupMembers(Request $request, School $school, SchoolGroup $group): JsonResponse
-    {
+    public function syncGroupMembers(
+        Request $request,
+        School $school,
+        SchoolGroup $group,
+        SyncSchoolGroupMembersAction $action,
+    ): JsonResponse {
         if (! $this->assertManagesSchool($request->user(), $school)) {
             return response()->json(['message' => 'Forbidden'], 403);
         }
@@ -668,39 +688,20 @@ class SchoolAdminController extends Controller
         }
 
         $validated = $request->validate([
-            'member_ids' => ['required', 'array'],
+            'member_ids' => ['present', 'array'],
             'member_ids.*' => ['integer', 'exists:users,id'],
+            'school_class_id' => [
+                'nullable',
+                'uuid',
+                Rule::exists('school_classes', 'id')->where('school_id', $school->id),
+            ],
         ]);
 
-        DB::transaction(function () use ($group, $validated) {
-            $desired = array_values(array_unique(array_map('intval', $validated['member_ids'])));
-            $existing = SchoolGroupMember::query()
-                ->where('school_group_id', $group->id)
-                ->pluck('user_id')
-                ->map(fn ($id) => (int) $id)
-                ->all();
-
-            $toAdd = array_diff($desired, $existing);
-            $toRemove = array_diff($existing, $desired);
-
-            if ($toRemove !== []) {
-                SchoolGroupMember::query()
-                    ->where('school_group_id', $group->id)
-                    ->whereIn('user_id', $toRemove)
-                    ->delete();
-            }
-
-            foreach ($toAdd as $userId) {
-                SchoolGroupMember::query()->create([
-                    'id' => (string) Str::uuid(),
-                    'school_group_id' => $group->id,
-                    'user_id' => $userId,
-                    'member_role' => 'member',
-                ]);
-            }
-        });
-
-        $group->load(['members.user:id,name,email,role']);
+        $group = $action->execute(
+            $group,
+            $validated['member_ids'],
+            $validated['school_class_id'] ?? null,
+        );
 
         return response()->json(['data' => $group]);
     }
@@ -1023,7 +1024,8 @@ class SchoolAdminController extends Controller
                             ->orWhereIn('school_group_id', function ($sub) use ($user) {
                                 $sub->select('school_group_id')
                                     ->from('school_group_members')
-                                    ->where('user_id', $user->id);
+                                    ->where('user_id', $user->id)
+                                    ->where('status', 'active');
                             });
                     });
             })
@@ -1652,6 +1654,7 @@ class SchoolAdminController extends Controller
         if ($schoolGroupId !== null) {
             $memberIds = SchoolGroupMember::query()
                 ->where('school_group_id', $schoolGroupId)
+                ->where('status', 'active')
                 ->pluck('user_id')
                 ->map(fn ($id) => (int) $id)
                 ->all();

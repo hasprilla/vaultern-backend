@@ -20,6 +20,7 @@ class SchoolGroupMember extends Model
         'school_group_id',
         'user_id',
         'member_role',
+        'status',
     ];
 
     /** @return BelongsTo<SchoolGroup, $this> */
