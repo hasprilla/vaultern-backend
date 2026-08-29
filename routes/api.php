@@ -9,6 +9,9 @@ use App\Http\Controllers\Api\V1\Family\FamilyEventGuestController;
 use App\Http\Controllers\Api\V1\Family\FamilyEventInvitationController;
 use App\Http\Controllers\Api\V1\Family\FamilyMedicationController;
 use App\Http\Controllers\Api\V1\Family\FamilyMedicationLogController;
+use App\Http\Controllers\Api\V1\Rewards\RewardItemController;
+use App\Http\Controllers\Api\V1\Rewards\RewardRedeemController;
+use App\Http\Controllers\Api\V1\Rewards\RewardSettingsController;
 use App\Http\Controllers\Api\V1\Rewards\RewardsController;
 use App\Http\Controllers\Api\V1\Family\ParentMessageController;
 use App\Http\Controllers\Api\V1\Finance\ChildSupportController;
@@ -17,6 +20,7 @@ use App\Http\Controllers\Api\V1\Notification\NotificationController;
 use App\Http\Controllers\Api\V1\Ocr\OcrController;
 use App\Http\Controllers\Api\V1\Profile\ProfileController;
 use App\Http\Controllers\Api\V1\School\SchoolAdminController;
+use App\Http\Controllers\Api\V1\School\SchoolAttendanceController;
 use App\Http\Controllers\Api\V1\School\SchoolBroadcastController;
 use App\Http\Controllers\Api\V1\School\SchoolEnrollmentController;
 use App\Http\Controllers\Api\V1\Subscription\SubscriptionController;
@@ -161,6 +165,11 @@ Route::prefix('v1')->middleware(['api.auth', 'device.recovery', 'tenant'])->grou
     Route::post('/finance/child-support/{agreement}/attachments', [ChildSupportController::class, 'storeAttachments']);
 
     Route::get('/rewards/summary', [RewardsController::class, 'summary']);
+    Route::get('/rewards/items', [RewardItemController::class, 'index']);
+    Route::post('/rewards/items', [RewardItemController::class, 'store']);
+    Route::patch('/rewards/items/{item}', [RewardItemController::class, 'update']);
+    Route::put('/rewards/settings', [RewardSettingsController::class, 'update']);
+    Route::post('/rewards/redeem', [RewardRedeemController::class, 'store']);
 
     Route::get('/dashboard/analytics', [DashboardController::class, 'analytics']);
     Route::get('/dashboard/task-daily-stats', [DashboardController::class, 'taskDailyStats']);
@@ -200,6 +209,8 @@ Route::prefix('v1')->middleware(['api.auth', 'device.recovery', 'tenant'])->grou
     Route::get('/school/enrollments', [SchoolEnrollmentController::class, 'index']);
     Route::post('/school/enrollments', [SchoolEnrollmentController::class, 'store']);
     Route::delete('/school/enrollments/{enrollment}', [SchoolEnrollmentController::class, 'destroy']);
+    Route::get('/school/attendance/mine', [SchoolAttendanceController::class, 'index']);
+    Route::post('/school/attendance', [SchoolAttendanceController::class, 'store']);
 
     Route::get('/school/teachers/schools', [SchoolBroadcastController::class, 'schools']);
     Route::get('/school/teachers/classes', [SchoolBroadcastController::class, 'classes']);

@@ -12,13 +12,15 @@ use App\Support\SchemaCompat;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Al completar una tarea de un hijo: +10 puntos y +500 COP de mesada virtual.
+ * Al completar una tarea de un hijo: puntos y mesada virtual (settings o defaults).
  */
 final class AwardTaskRewardAction
 {
     public const POINTS_PER_TASK = 10;
 
     public const ALLOWANCE_PER_TASK = 500.0;
+
+    public function __construct(private readonly ResolveFamilyRewardSettingsAction $resolve) {}
 
     public function execute(User $actor, Task $task): void
     {
@@ -38,8 +40,9 @@ final class AwardTaskRewardAction
 
         $familyId = (string) $actor->family_id;
         $sourceId = (string) $task->id;
+        $settings = $this->resolve->execute($familyId);
 
-        DB::transaction(function () use ($familyId, $childId, $sourceId, $task) {
+        DB::transaction(function () use ($familyId, $childId, $sourceId, $task, $settings) {
             $exists = ChildRewardEvent::query()
                 ->where('family_id', $familyId)
                 ->where('source_type', 'task_completed')
@@ -49,13 +52,16 @@ final class AwardTaskRewardAction
                 return;
             }
 
+            $points = $settings['points_per_task'];
+            $allowance = $settings['allowance_per_task'];
+
             ChildRewardEvent::query()->create([
                 'family_id' => $familyId,
                 'child_user_id' => $childId,
                 'source_type' => 'task_completed',
                 'source_id' => $sourceId,
-                'points_delta' => self::POINTS_PER_TASK,
-                'allowance_delta' => self::ALLOWANCE_PER_TASK,
+                'points_delta' => $points,
+                'allowance_delta' => $allowance,
                 'note' => 'Tarea: '.$task->title,
             ]);
 
@@ -65,8 +71,8 @@ final class AwardTaskRewardAction
             );
 
             $balance->update([
-                'points' => (int) $balance->points + self::POINTS_PER_TASK,
-                'allowance_balance' => (float) $balance->allowance_balance + self::ALLOWANCE_PER_TASK,
+                'points' => (int) $balance->points + $points,
+                'allowance_balance' => (float) $balance->allowance_balance + $allowance,
             ]);
         });
     }
