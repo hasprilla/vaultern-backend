@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1\School;
 
+use App\Application\School\Queries\ListMySchoolMeetingsQuery;
 use App\Http\Controllers\Controller;
 use App\Models\ClassEnrollment;
 use App\Models\School;
@@ -861,6 +862,41 @@ class SchoolAdminController extends Controller
         ]);
 
         return response()->json(['data' => $rsvp->fresh()]);
+    }
+
+    public function myMeetings(Request $request, ListMySchoolMeetingsQuery $query): JsonResponse
+    {
+        $meetings = $query->handle($request->user());
+
+        return response()->json([
+            'data' => $meetings->map(function (SchoolMeeting $m) {
+                $mine = $m->rsvps->first();
+
+                return [
+                    'id' => $m->id,
+                    'title' => $m->title,
+                    'description' => $m->description,
+                    'starts_at' => $m->starts_at?->toIso8601String(),
+                    'ends_at' => $m->ends_at?->toIso8601String(),
+                    'location' => $m->location,
+                    'status' => $m->status,
+                    'school' => $m->school === null ? null : [
+                        'id' => $m->school->id,
+                        'name' => $m->school->name,
+                    ],
+                    'creator' => $m->creator === null ? null : [
+                        'id' => $m->creator->id,
+                        'name' => $m->creator->name,
+                    ],
+                    'my_rsvp' => $mine === null ? null : [
+                        'id' => $mine->id,
+                        'status' => $mine->status,
+                        'observation' => $mine->observation,
+                        'responded_at' => $mine->responded_at?->toIso8601String(),
+                    ],
+                ];
+            })->values(),
+        ]);
     }
 
     public function listMeetings(Request $request, School $school): JsonResponse

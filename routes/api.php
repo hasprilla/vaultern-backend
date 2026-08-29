@@ -4,6 +4,9 @@ use App\Http\Controllers\Api\V1\Auth\AuthController;
 use App\Http\Controllers\Api\V1\Auth\MfaController;
 use App\Http\Controllers\Api\V1\Dashboard\DashboardController;
 use App\Http\Controllers\Api\V1\Family\FamilyController;
+use App\Http\Controllers\Api\V1\Family\FamilyEventController;
+use App\Http\Controllers\Api\V1\Family\FamilyEventGuestController;
+use App\Http\Controllers\Api\V1\Family\FamilyEventInvitationController;
 use App\Http\Controllers\Api\V1\Rewards\RewardsController;
 use App\Http\Controllers\Api\V1\Family\ParentMessageController;
 use App\Http\Controllers\Api\V1\Finance\ChildSupportController;
@@ -97,6 +100,17 @@ Route::prefix('v1')->middleware(['api.auth', 'device.recovery', 'tenant'])->grou
     Route::get('/families/{family}/messages', [ParentMessageController::class, 'index']);
     Route::post('/families/{family}/messages', [ParentMessageController::class, 'store']);
     Route::patch('/families/{family}/messages/{message}/read', [ParentMessageController::class, 'markRead']);
+
+    Route::get('/events/invitations/me', [FamilyEventInvitationController::class, 'index']);
+    Route::get('/events', [FamilyEventController::class, 'index']);
+    Route::post('/events', [FamilyEventController::class, 'store']);
+    Route::get('/events/{event}', [FamilyEventController::class, 'show']);
+    Route::patch('/events/{event}', [FamilyEventController::class, 'update']);
+    Route::post('/events/{event}/cancel', [FamilyEventController::class, 'cancel']);
+    Route::get('/events/{event}/guests', [FamilyEventGuestController::class, 'index']);
+    Route::post('/events/{event}/guests', [FamilyEventGuestController::class, 'store']);
+    Route::put('/events/{event}/guests', [FamilyEventGuestController::class, 'sync']);
+    Route::patch('/events/{event}/guests/{guest}/rsvp', [FamilyEventGuestController::class, 'rsvp']);
 
     Route::apiResource('tasks', TaskController::class);
     Route::patch('/tasks/{task}/complete', [TaskController::class, 'complete']);
@@ -222,6 +236,7 @@ Route::prefix('v1')->middleware(['api.auth', 'device.recovery', 'tenant'])->grou
     Route::patch('/school/admin/{school}/subscription', [SchoolAdminController::class, 'updateSchoolSubscription']);
 
     Route::post('/school/meetings/{meeting}/rsvp', [SchoolAdminController::class, 'respondMeeting']);
+    Route::get('/school/meetings/mine', [SchoolAdminController::class, 'myMeetings']);
     Route::patch('/school/schedules/{schedule}', [SchoolAdminController::class, 'updateSchedule']);
     Route::post('/school/schedules/{schedule}/share', [SchoolAdminController::class, 'shareSchedule']);
     Route::patch('/school/teacher-tasks/{task}', [SchoolAdminController::class, 'updateTeacherTask']);

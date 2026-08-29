@@ -86,6 +86,14 @@ class AttachmentsAndChildSupportTest extends TestCase
         ], $this->authHeaders($tokens))
             ->assertCreated()
             ->assertJsonPath('data.amount', 1100000);
+
+        $this->postJson(
+            "/api/v1/finance/child-support/{$agreementId}/end",
+            [],
+            $this->authHeaders($tokens),
+        )
+            ->assertOk()
+            ->assertJsonPath('data.status', 'ended');
     }
 
     private function createChild($family, User $parent): User
