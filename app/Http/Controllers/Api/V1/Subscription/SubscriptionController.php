@@ -188,7 +188,7 @@ class SubscriptionController extends Controller
     {
         $family = $this->resolveFamily($request);
         if ($family === null) {
-            return response()->json(['message' => 'Familia no encontrada'], 404);
+            return response()->json(['message' => $this->tenantMissingMessage($request)], 404);
         }
 
         $methods = $this->paymentMethods->listActiveApi($family);
@@ -201,7 +201,7 @@ class SubscriptionController extends Controller
     {
         $family = $this->resolveFamily($request);
         if ($family === null) {
-            return response()->json(['message' => 'Familia no encontrada'], 404);
+            return response()->json(['message' => $this->tenantMissingMessage($request)], 404);
         }
 
         return response()->json([
@@ -213,7 +213,7 @@ class SubscriptionController extends Controller
     {
         $family = $this->resolveFamily($request);
         if ($family === null) {
-            return response()->json(['message' => 'Familia no encontrada'], 404);
+            return response()->json(['message' => $this->tenantMissingMessage($request)], 404);
         }
 
         $validated = $request->validate([
@@ -266,7 +266,7 @@ class SubscriptionController extends Controller
     {
         $family = $this->resolveFamily($request);
         if ($family === null) {
-            return response()->json(['message' => 'Familia no encontrada'], 404);
+            return response()->json(['message' => $this->tenantMissingMessage($request)], 404);
         }
 
         if ($paymentMethod->family_id !== $family->id) {
@@ -282,7 +282,7 @@ class SubscriptionController extends Controller
     {
         $family = $this->resolveFamily($request);
         if ($family === null) {
-            return response()->json(['message' => 'Familia no encontrada'], 404);
+            return response()->json(['message' => $this->tenantMissingMessage($request)], 404);
         }
 
         $result = $this->deleteSavedPaymentMethod->executeOne($family, $request->user(), $paymentMethod->id);
@@ -297,7 +297,7 @@ class SubscriptionController extends Controller
     {
         $family = $this->resolveFamily($request);
         if ($family === null) {
-            return response()->json(['message' => 'Familia no encontrada'], 404);
+            return response()->json(['message' => $this->tenantMissingMessage($request)], 404);
         }
 
         $result = $this->deleteSavedPaymentMethod->execute($family, $request->user());
@@ -312,7 +312,7 @@ class SubscriptionController extends Controller
     {
         $family = $this->resolveFamily($request);
         if ($family === null) {
-            return response()->json(['message' => 'Familia no encontrada'], 404);
+            return response()->json(['message' => $this->tenantMissingMessage($request)], 404);
         }
 
         // Normalizar año 2 dígitos → 4 (Flutter envía 2030; algunos clientes envían 30).
@@ -351,7 +351,7 @@ class SubscriptionController extends Controller
     {
         $family = $this->resolveFamily($request);
         if ($family === null) {
-            return response()->json(['message' => 'Familia no encontrada'], 404);
+            return response()->json(['message' => $this->tenantMissingMessage($request)], 404);
         }
 
         $validated = $request->validated();
@@ -541,7 +541,7 @@ HTML;
     {
         $family = $this->resolveFamily($request);
         if ($family === null) {
-            return response()->json(['message' => 'Familia no encontrada'], 404);
+            return response()->json(['message' => $this->tenantMissingMessage($request)], 404);
         }
 
         $validated = $request->validate([
@@ -567,7 +567,7 @@ HTML;
     {
         $family = $this->resolveFamily($request);
         if ($family === null) {
-            return response()->json(['message' => 'Familia no encontrada'], 404);
+            return response()->json(['message' => $this->tenantMissingMessage($request)], 404);
         }
 
         $result = $this->schedulePlanChange->cancel($family, $request->user());
@@ -585,7 +585,7 @@ HTML;
     {
         $family = $this->resolveFamily($request);
         if ($family === null) {
-            return response()->json(['message' => 'Familia no encontrada'], 404);
+            return response()->json(['message' => $this->tenantMissingMessage($request)], 404);
         }
 
         $result = $this->cancelService->cancel($family, $request->user());
@@ -606,7 +606,7 @@ HTML;
     {
         $family = $this->resolveFamily($request);
         if ($family === null) {
-            return response()->json(['message' => 'Familia no encontrada'], 404);
+            return response()->json(['message' => $this->tenantMissingMessage($request)], 404);
         }
 
         $result = $this->billingService->resumeScheduledCancellation($family, $request->user());
@@ -621,7 +621,7 @@ HTML;
     {
         $family = $this->resolveFamily($request);
         if ($family === null) {
-            return response()->json(['message' => 'Familia no encontrada'], 404);
+            return response()->json(['message' => $this->tenantMissingMessage($request)], 404);
         }
 
         // Pagos pending del mismo plan activo: cerrar como fallidos (evita fantasma al recomprar).
@@ -685,6 +685,15 @@ HTML;
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{$t}</title></head>
 <body style="font-family:system-ui;text-align:center;padding:48px 24px"><h1>{$t}</h1><p>{$h}</p></body></html>
 HTML;
+    }
+
+    private function tenantMissingMessage(Request $request): string
+    {
+        return match ($request->user()?->role) {
+            'docente', 'admin_escuela', 'admin' => 'Institución no encontrada',
+            'tutor' => 'Tutoría no encontrada',
+            default => 'Familia no encontrada',
+        };
     }
 
     private function resolveFamily(Request $request): ?Family

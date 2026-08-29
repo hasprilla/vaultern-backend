@@ -83,12 +83,25 @@ class SchoolBroadcastController extends Controller
     {
         $schoolIds = $this->schoolIdsFor($request);
 
+        $primaryBySchool = TeacherMembership::query()
+            ->where('user_id', $request->user()->id)
+            ->where('status', 'active')
+            ->whereIn('school_id', $schoolIds)
+            ->pluck('primary_subject', 'school_id');
+
         $classes = SchoolClass::query()
             ->with(['school:id,name,code'])
             ->withCount('enrollments')
             ->whereIn('school_id', $schoolIds)
             ->orderBy('name')
-            ->get();
+            ->get()
+            ->map(static function (SchoolClass $class) use ($primaryBySchool) {
+                $row = $class->toArray();
+                $row['subject'] = $primaryBySchool->get($class->school_id);
+
+                return $row;
+            })
+            ->values();
 
         return response()->json(['data' => $classes]);
     }

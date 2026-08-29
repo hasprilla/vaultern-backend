@@ -23,6 +23,7 @@ use App\Http\Controllers\Api\V1\School\SchoolAdminController;
 use App\Http\Controllers\Api\V1\School\SchoolAttendanceController;
 use App\Http\Controllers\Api\V1\School\SchoolBroadcastController;
 use App\Http\Controllers\Api\V1\School\SchoolEnrollmentController;
+use App\Http\Controllers\Api\V1\School\TeacherProfileController;
 use App\Http\Controllers\Api\V1\Subscription\SubscriptionController;
 use App\Http\Controllers\Api\V1\Subscription\WompiWebhookController;
 use App\Http\Controllers\Api\V1\Support\SupportController;
@@ -214,6 +215,8 @@ Route::prefix('v1')->middleware(['api.auth', 'device.recovery', 'tenant'])->grou
 
     Route::get('/school/teachers/schools', [SchoolBroadcastController::class, 'schools']);
     Route::get('/school/teachers/classes', [SchoolBroadcastController::class, 'classes']);
+    Route::get('/school/teachers/me', [TeacherProfileController::class, 'show']);
+    Route::patch('/school/teachers/me', [TeacherProfileController::class, 'update']);
     Route::get('/school/broadcasts', [SchoolBroadcastController::class, 'index']);
     Route::post('/school/broadcasts', [SchoolBroadcastController::class, 'store']);
     Route::get('/school/broadcasts/{broadcast}', [SchoolBroadcastController::class, 'show']);

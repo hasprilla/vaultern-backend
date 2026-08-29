@@ -21,6 +21,12 @@ class TeacherMembership extends Model
         'user_id',
         'role',
         'status',
+        'subjects',
+        'primary_subject',
+    ];
+
+    protected $casts = [
+        'subjects' => 'array',
     ];
 
     public function school(): BelongsTo
