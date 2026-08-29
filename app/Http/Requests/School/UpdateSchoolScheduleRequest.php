@@ -25,6 +25,8 @@ final class UpdateSchoolScheduleRequest extends FormRequest
             'slots.*.end' => ['required', 'string'],
             'slots.*.subject' => ['nullable', 'string', 'max:120'],
             'slots.*.kind' => ['nullable', Rule::in(['lesson', 'break'])],
+            'slots.*.teacher_user_id' => ['nullable', 'integer', 'exists:users,id'],
+            'slots.*.teacher_name' => ['nullable', 'string', 'max:120'],
             'exceptions' => ['sometimes', 'nullable', 'array'],
             'exceptions.*.date' => ['required', 'date'],
             'exceptions.*.end_date' => ['nullable', 'date', 'after_or_equal:exceptions.*.date'],
