@@ -94,12 +94,29 @@ class FamilyEventApiTest extends TestCase
 
         $this->putJson("/api/v1/events/{$event->id}/guests", [
             'guests' => [
-                ['user_id' => $partner->id, 'name' => $partner->name, 'email' => $partner->email],
-                ['name' => 'Tía Rosa', 'email' => 'tia.rosa@yopmail.com'],
+                [
+                    'user_id' => $partner->id,
+                    'name' => $partner->name,
+                    'email' => $partner->email,
+                    'guest_kind' => 'adult',
+                ],
+                [
+                    'name' => 'Primo niño',
+                    'email' => 'primo.nino@yopmail.com',
+                    'guest_kind' => 'child',
+                ],
             ],
         ], $this->authHeaders($tokens))
             ->assertOk()
-            ->assertJsonPath('data.rsvp_counts.total', 2);
+            ->assertJsonPath('data.rsvp_counts.total', 2)
+            ->assertJsonPath('data.rsvp_counts.adults', 1)
+            ->assertJsonPath('data.rsvp_counts.children', 1);
+
+        $this->assertDatabaseHas('family_event_guests', [
+            'event_id' => $event->id,
+            'name' => 'Primo niño',
+            'guest_kind' => 'child',
+        ]);
 
         $guest = FamilyEventGuest::query()
             ->where('event_id', $event->id)

@@ -7,6 +7,8 @@ use App\Http\Controllers\Api\V1\Family\FamilyController;
 use App\Http\Controllers\Api\V1\Family\FamilyEventController;
 use App\Http\Controllers\Api\V1\Family\FamilyEventGuestController;
 use App\Http\Controllers\Api\V1\Family\FamilyEventInvitationController;
+use App\Http\Controllers\Api\V1\Family\FamilyMedicationController;
+use App\Http\Controllers\Api\V1\Family\FamilyMedicationLogController;
 use App\Http\Controllers\Api\V1\Rewards\RewardsController;
 use App\Http\Controllers\Api\V1\Family\ParentMessageController;
 use App\Http\Controllers\Api\V1\Finance\ChildSupportController;
@@ -111,6 +113,12 @@ Route::prefix('v1')->middleware(['api.auth', 'device.recovery', 'tenant'])->grou
     Route::post('/events/{event}/guests', [FamilyEventGuestController::class, 'store']);
     Route::put('/events/{event}/guests', [FamilyEventGuestController::class, 'sync']);
     Route::patch('/events/{event}/guests/{guest}/rsvp', [FamilyEventGuestController::class, 'rsvp']);
+
+    Route::get('/medications', [FamilyMedicationController::class, 'index']);
+    Route::post('/medications', [FamilyMedicationController::class, 'store']);
+    Route::patch('/medications/{medication}', [FamilyMedicationController::class, 'update']);
+    Route::post('/medications/{medication}/taken', [FamilyMedicationController::class, 'taken']);
+    Route::get('/medications/{medication}/logs', [FamilyMedicationLogController::class, 'index']);
 
     Route::apiResource('tasks', TaskController::class);
     Route::patch('/tasks/{task}/complete', [TaskController::class, 'complete']);

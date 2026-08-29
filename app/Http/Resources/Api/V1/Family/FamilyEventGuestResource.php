@@ -20,6 +20,7 @@ class FamilyEventGuestResource extends JsonResource
             'name' => $this->name,
             'email' => $this->email,
             'phone' => $this->phone,
+            'guest_kind' => $this->guest_kind ?? 'adult',
             'status' => $this->status,
             'note' => $this->note,
             'invited_at' => $this->invited_at?->toIso8601String(),

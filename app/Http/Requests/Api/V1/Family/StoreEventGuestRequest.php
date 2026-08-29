@@ -21,6 +21,7 @@ class StoreEventGuestRequest extends FormRequest
             'email' => ['nullable', 'email', 'max:255'],
             'phone' => ['nullable', 'string', 'max:40'],
             'user_id' => ['nullable', 'integer', 'exists:users,id'],
+            'guest_kind' => ['nullable', 'in:adult,child'],
         ];
     }
 }

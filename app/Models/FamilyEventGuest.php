@@ -22,6 +22,7 @@ class FamilyEventGuest extends Model
         'name',
         'email',
         'phone',
+        'guest_kind',
         'status',
         'note',
         'invited_at',

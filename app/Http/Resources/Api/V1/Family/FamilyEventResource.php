@@ -37,6 +37,8 @@ class FamilyEventResource extends JsonResource
                     'declined' => $all->where('status', 'declined')->count(),
                     'maybe' => $all->where('status', 'maybe')->count(),
                     'total' => $all->count(),
+                    'adults' => $all->where('guest_kind', 'adult')->count(),
+                    'children' => $all->where('guest_kind', 'child')->count(),
                 ];
             }),
         ];

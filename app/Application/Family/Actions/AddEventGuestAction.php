@@ -27,6 +27,7 @@ final class AddEventGuestAction
             'name' => $data['name'],
             'email' => $email,
             'phone' => $data['phone'] ?? null,
+            'guest_kind' => ($data['guest_kind'] ?? 'adult') === 'child' ? 'child' : 'adult',
             'status' => 'pending',
             'invited_at' => now(),
         ]);

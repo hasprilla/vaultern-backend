@@ -12,7 +12,7 @@ use Illuminate\Support\Str;
 final class UpsertEventGuestsAction
 {
     /**
-     * @param  list<array{user_id?: int|null, name: string, email?: string|null, phone?: string|null}>  $guests
+     * @param  list<array{user_id?: int|null, name: string, email?: string|null, phone?: string|null, guest_kind?: string|null}>  $guests
      * @return list<string>
      */
     public function execute(FamilyEvent $event, array $guests): array
@@ -23,6 +23,7 @@ final class UpsertEventGuestsAction
                 ? strtolower(trim((string) $row['email']))
                 : null;
             $userId = isset($row['user_id']) ? (int) $row['user_id'] : null;
+            $kind = ($row['guest_kind'] ?? 'adult') === 'child' ? 'child' : 'adult';
             $existing = $this->findExisting($event->id, $userId, $email);
             if ($existing) {
                 $existing->fill([
@@ -30,6 +31,7 @@ final class UpsertEventGuestsAction
                     'email' => $email,
                     'phone' => $row['phone'] ?? $existing->phone,
                     'user_id' => $userId ?? $existing->user_id,
+                    'guest_kind' => $kind,
                 ])->save();
                 $keepIds[] = $existing->id;
                 continue;
@@ -41,6 +43,7 @@ final class UpsertEventGuestsAction
                 'name' => $row['name'],
                 'email' => $email,
                 'phone' => $row['phone'] ?? null,
+                'guest_kind' => $kind,
                 'status' => 'pending',
                 'invited_at' => now(),
             ])->id;

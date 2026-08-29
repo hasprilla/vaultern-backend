@@ -22,6 +22,7 @@ class SyncEventGuestsRequest extends FormRequest
             'guests.*.email' => ['nullable', 'email', 'max:255'],
             'guests.*.phone' => ['nullable', 'string', 'max:40'],
             'guests.*.user_id' => ['nullable', 'integer', 'exists:users,id'],
+            'guests.*.guest_kind' => ['nullable', 'in:adult,child'],
         ];
     }
 }
