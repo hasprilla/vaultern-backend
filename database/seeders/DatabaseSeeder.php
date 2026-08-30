@@ -23,6 +23,15 @@ class DatabaseSeeder extends Seeder
             QaSchoolBroadcastsSeeder::class,
             QaSchoolAnnouncementsExtraSeeder::class,
             QaSchoolMeetingsTasksExtraSeeder::class,
+            QaVolumeAnnouncementsSeeder::class,
+            QaVolumeMeetingsSeeder::class,
+            QaVolumePsychSeeder::class,
+            QaVolumeHealthSeeder::class,
+            QaVolumeAttendanceSeeder::class,
+            QaVolumeBroadcastsSeeder::class,
+            QaVolumeTeacherTasksSeeder::class,
+            QaVolumeGroupsSeeder::class,
+            QaFamilyEventsSeeder::class,
         ]);
     }
 }

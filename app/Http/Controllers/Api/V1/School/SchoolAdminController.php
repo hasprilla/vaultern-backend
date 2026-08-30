@@ -8,6 +8,9 @@ use App\Application\School\Actions\StoreSchoolScheduleAction;
 use App\Application\School\Actions\SyncSchoolGroupMembersAction;
 use App\Application\School\Actions\UpdateSchoolScheduleAction;
 use App\Application\School\Queries\ListMySchoolMeetingsQuery;
+use App\Application\School\Queries\ListSchoolAnnouncementsQuery;
+use App\Application\School\Queries\ListSchoolHealthAlertsQuery;
+use App\Application\School\Queries\ListSchoolPsychCasesQuery;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\School\StoreSchoolScheduleRequest;
 use App\Http\Requests\School\UpdateSchoolScheduleRequest;
@@ -763,6 +766,26 @@ class SchoolAdminController extends Controller
         return response()->json(['data' => $announcement], 201);
     }
 
+    public function listAnnouncements(
+        Request $request,
+        School $school,
+        ListSchoolAnnouncementsQuery $query,
+    ): JsonResponse {
+        if (! $this->assertBelongsToSchool($request->user(), $school)) {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
+        $type = $request->query('type');
+        $types = null;
+        if (is_string($type) && $type !== '') {
+            $types = [$type];
+        } elseif (is_array($request->query('types'))) {
+            $types = array_values(array_filter($request->query('types'), 'is_string'));
+        }
+
+        return response()->json(['data' => $query->handle($school->id, $types)]);
+    }
+
     public function storeMeeting(Request $request, School $school): JsonResponse
     {
         if (! $this->assertBelongsToSchool($request->user(), $school)) {
@@ -1271,19 +1294,19 @@ class SchoolAdminController extends Controller
         return response()->json(['data' => $note], 201);
     }
 
-    public function listPsychCases(Request $request, School $school): JsonResponse
-    {
+    public function listPsychCases(
+        Request $request,
+        School $school,
+        ListSchoolPsychCasesQuery $query,
+    ): JsonResponse {
         if (! $this->assertBelongsToSchool($request->user(), $school)) {
             return response()->json(['message' => 'Forbidden'], 403);
         }
 
-        $cases = SchoolPsychCase::query()
-            ->with(['student:id,name', 'notes'])
-            ->where('school_id', $school->id)
-            ->orderByDesc('created_at')
-            ->get();
+        $studentId = $request->query('student_user_id');
+        $studentUserId = is_numeric($studentId) ? (int) $studentId : null;
 
-        return response()->json(['data' => $cases]);
+        return response()->json(['data' => $query->handle($school->id, $studentUserId)]);
     }
 
     public function storeHealthAlert(Request $request, School $school): JsonResponse
@@ -1336,19 +1359,23 @@ class SchoolAdminController extends Controller
         return response()->json(['data' => $alert], 201);
     }
 
-    public function listHealthAlerts(Request $request, School $school): JsonResponse
-    {
+    public function listHealthAlerts(
+        Request $request,
+        School $school,
+        ListSchoolHealthAlertsQuery $query,
+    ): JsonResponse {
         if (! $this->assertBelongsToSchool($request->user(), $school)) {
             return response()->json(['message' => 'Forbidden'], 403);
         }
 
-        $alerts = SchoolHealthAlert::query()
-            ->with(['student:id,name'])
-            ->where('school_id', $school->id)
-            ->orderByDesc('created_at')
-            ->get();
+        $studentId = $request->query('student_user_id');
+        $studentUserId = is_numeric($studentId) ? (int) $studentId : null;
+        $type = $request->query('type');
+        $typeFilter = is_string($type) && $type !== '' ? $type : null;
 
-        return response()->json(['data' => $alerts]);
+        return response()->json([
+            'data' => $query->handle($school->id, $studentUserId, $typeFilter),
+        ]);
     }
 
     public function schoolSubscription(Request $request, School $school): JsonResponse

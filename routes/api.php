@@ -243,6 +243,7 @@ Route::prefix('v1')->middleware(['api.auth', 'device.recovery', 'tenant'])->grou
     Route::post('/school/admin/{school}/groups', [SchoolAdminController::class, 'storeGroup']);
     Route::put('/school/admin/{school}/groups/{group}/members', [SchoolAdminController::class, 'syncGroupMembers']);
     Route::post('/school/admin/{school}/announce', [SchoolAdminController::class, 'announce']);
+    Route::get('/school/admin/{school}/announcements', [SchoolAdminController::class, 'listAnnouncements']);
     Route::post('/school/admin/{school}/meetings', [SchoolAdminController::class, 'storeMeeting']);
     Route::get('/school/admin/{school}/meetings', [SchoolAdminController::class, 'listMeetings']);
     Route::get('/school/curriculum/profiles', [CurriculumController::class, 'profiles']);
