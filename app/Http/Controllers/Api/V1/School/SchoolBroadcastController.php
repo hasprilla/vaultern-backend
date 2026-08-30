@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1\School;
 
 use App\Application\School\Actions\CreateSchoolBroadcastAction;
+use App\Application\School\Support\MapSchoolListItem;
 use App\Http\Controllers\Controller;
 use App\Models\School;
 use App\Models\SchoolClass;
@@ -109,10 +110,12 @@ class SchoolBroadcastController extends Controller
     public function schools(Request $request): JsonResponse
     {
         $user = $request->user();
+        $mapper = app(MapSchoolListItem::class);
 
         if ($user->isPlatformAdmin()) {
             $schools = School::query()
                 ->where('is_active', true)
+                ->with(['campuses' => static fn ($q) => $q->orderByDesc('is_main')->orderBy('name')])
                 ->withCount('classes')
                 ->orderBy('name')
                 ->get();
@@ -122,30 +125,20 @@ class SchoolBroadcastController extends Controller
                 ->get()
                 ->keyBy('school_id');
 
-            $data = $schools->map(static function (School $school) use ($subscriptions) {
+            $data = $schools->map(static function (School $school) use ($subscriptions, $mapper) {
                 $sub = $subscriptions->get($school->id);
 
-                return [
-                    'id' => $school->id,
-                    'name' => $school->name,
-                    'code' => $school->code,
-                    'city' => $school->city,
-                    'plan' => $school->plan,
-                    'is_active' => $school->is_active,
-                    'classes_count' => $school->classes_count ?? 0,
-                    'membership' => [
-                        'id' => null,
-                        'role' => 'admin',
-                        'status' => 'active',
-                    ],
-                    'subscription' => $sub === null ? null : [
-                        'id' => $sub->id,
-                        'plan_code' => $sub->plan_code,
-                        'status' => $sub->status,
-                        'billing' => $sub->billing,
-                        'current_period_end' => $sub->current_period_end,
-                    ],
-                ];
+                return $mapper->handle($school, [
+                    'id' => null,
+                    'role' => 'admin',
+                    'status' => 'active',
+                ], $sub === null ? null : [
+                    'id' => $sub->id,
+                    'plan_code' => $sub->plan_code,
+                    'status' => $sub->status,
+                    'billing' => $sub->billing,
+                    'current_period_end' => $sub->current_period_end,
+                ]);
             })->values();
 
             return response()->json(['data' => $data]);
@@ -154,7 +147,12 @@ class SchoolBroadcastController extends Controller
         $memberships = TeacherMembership::query()
             ->where('user_id', $user->id)
             ->where('status', 'active')
-            ->with(['school' => static fn ($q) => $q->where('is_active', true)->withCount('classes')])
+            ->with([
+                'school' => static fn ($q) => $q
+                    ->where('is_active', true)
+                    ->withCount('classes')
+                    ->with(['campuses' => static fn ($c) => $c->orderByDesc('is_main')->orderBy('name')]),
+            ])
             ->orderByDesc('updated_at')
             ->get();
 
@@ -172,31 +170,21 @@ class SchoolBroadcastController extends Controller
 
         $data = $memberships
             ->filter(static fn (TeacherMembership $m) => $m->school !== null)
-            ->map(static function (TeacherMembership $m) use ($subscriptions) {
+            ->map(static function (TeacherMembership $m) use ($subscriptions, $mapper) {
                 $school = $m->school;
                 $sub = $subscriptions->get($school->id);
 
-                return [
-                    'id' => $school->id,
-                    'name' => $school->name,
-                    'code' => $school->code,
-                    'city' => $school->city,
-                    'plan' => $school->plan,
-                    'is_active' => $school->is_active,
-                    'classes_count' => $school->classes_count ?? 0,
-                    'membership' => [
-                        'id' => $m->id,
-                        'role' => $m->role,
-                        'status' => $m->status,
-                    ],
-                    'subscription' => $sub === null ? null : [
-                        'id' => $sub->id,
-                        'plan_code' => $sub->plan_code,
-                        'status' => $sub->status,
-                        'billing' => $sub->billing,
-                        'current_period_end' => $sub->current_period_end,
-                    ],
-                ];
+                return $mapper->handle($school, [
+                    'id' => $m->id,
+                    'role' => $m->role,
+                    'status' => $m->status,
+                ], $sub === null ? null : [
+                    'id' => $sub->id,
+                    'plan_code' => $sub->plan_code,
+                    'status' => $sub->status,
+                    'billing' => $sub->billing,
+                    'current_period_end' => $sub->current_period_end,
+                ]);
             })
             ->values();
 
