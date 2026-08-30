@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Database\Seeders;
 
-use App\Models\SchoolAttendanceLog;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Schema;
 
@@ -39,13 +38,11 @@ final class QaSchoolAttendanceSeeder extends Seeder
         }
 
         foreach ($rows as [$student, $daysAgo, $status, $note, $by]) {
-            SchoolAttendanceLog::query()->updateOrCreate(
+            QaAttendanceUpsert::put(
+                (int) $student->id,
+                now()->subDays($daysAgo),
                 [
                     'school_id' => $school->id,
-                    'student_user_id' => $student->id,
-                    'attendance_date' => now()->subDays($daysAgo)->toDateString(),
-                ],
-                [
                     'family_id' => $student->family_id,
                     'reported_by' => $by,
                     'status' => $status,

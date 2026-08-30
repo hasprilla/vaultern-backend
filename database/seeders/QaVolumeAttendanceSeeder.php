@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Database\Seeders;
 
-use App\Models\SchoolAttendanceLog;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Schema;
 
@@ -27,12 +26,9 @@ final class QaVolumeAttendanceSeeder extends Seeder
 
         QaBulkSupport::each(function (int $i) use ($school, $padre, $docente, $sofia, $lucas): void {
             $student = ($i % 2 === 1) ? $sofia : ($lucas ?? $sofia);
-            $day = now()->subDays($i + 14)->toDateString();
-            SchoolAttendanceLog::query()->updateOrCreate(
-                [
-                    'student_user_id' => $student->id,
-                    'attendance_date' => $day,
-                ],
+            QaAttendanceUpsert::put(
+                (int) $student->id,
+                now()->subDays($i + 14),
                 [
                     'school_id' => $school->id,
                     'family_id' => $student->family_id,
