@@ -23,6 +23,10 @@ class UpdateFamilyEventRequest extends FormRequest
             'ends_at' => ['nullable', 'date'],
             'location' => ['nullable', 'string', 'max:255'],
             'status' => ['sometimes', 'in:scheduled,cancelled,done'],
+            'kind' => ['nullable', 'in:general,child_party'],
+            'child_user_id' => ['nullable', 'integer', 'exists:users,id'],
+            'budget_amount' => ['nullable', 'numeric', 'min:0'],
+            'currency' => ['nullable', 'string', 'max:8'],
         ];
     }
 }

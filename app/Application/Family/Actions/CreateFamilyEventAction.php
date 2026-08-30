@@ -30,12 +30,16 @@ final class CreateFamilyEventAction
             'ends_at' => $data['ends_at'] ?? null,
             'location' => $data['location'] ?? null,
             'status' => 'scheduled',
+            'kind' => $data['kind'] ?? 'general',
+            'child_user_id' => $data['child_user_id'] ?? null,
+            'budget_amount' => $data['budget_amount'] ?? null,
+            'currency' => $data['currency'] ?? 'COP',
         ]);
 
         $this->notifications->notifyFamily(
             $actor,
             'family_event',
-            'Nuevo evento familiar',
+            ($event->kind === 'child_party') ? 'Nueva fiesta familiar' : 'Nuevo evento familiar',
             "{$actor->name}: {$event->title}",
             [
                 'entity_type' => 'family_event',
@@ -44,6 +48,6 @@ final class CreateFamilyEventAction
             ],
         );
 
-        return $event->load(['creator:id,name', 'guests']);
+        return $event->load(['creator:id,name', 'guests', 'child:id,name', 'expenses']);
     }
 }

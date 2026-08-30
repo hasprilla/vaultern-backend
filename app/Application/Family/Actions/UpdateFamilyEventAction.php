@@ -16,9 +16,10 @@ final class UpdateFamilyEventAction
 
         $event->fill(array_intersect_key($data, array_flip([
             'title', 'description', 'starts_at', 'ends_at', 'location', 'status',
+            'kind', 'child_user_id', 'budget_amount', 'currency',
         ])));
         $event->save();
 
-        return $event->load(['creator:id,name', 'guests']);
+        return $event->load(['creator:id,name', 'guests', 'child:id,name', 'expenses']);
     }
 }

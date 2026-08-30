@@ -16,7 +16,7 @@ trait FindsFamilyEvent
 
         return FamilyEvent::query()
             ->where('family_id', $user->family_id)
-            ->with(['creator:id,name', 'guests.user:id,name,email'])
+            ->with(['creator:id,name', 'guests.user:id,name,email', 'child:id,name', 'expenses'])
             ->findOrFail($eventId);
     }
 }

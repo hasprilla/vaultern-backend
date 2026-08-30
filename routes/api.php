@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\V1\Auth\MfaController;
 use App\Http\Controllers\Api\V1\Dashboard\DashboardController;
 use App\Http\Controllers\Api\V1\Family\FamilyController;
 use App\Http\Controllers\Api\V1\Family\FamilyEventController;
+use App\Http\Controllers\Api\V1\Family\FamilyEventExpenseController;
 use App\Http\Controllers\Api\V1\Family\FamilyEventGuestController;
 use App\Http\Controllers\Api\V1\Family\FamilyEventInvitationController;
 use App\Http\Controllers\Api\V1\Family\FamilyMedicationController;
@@ -119,6 +120,10 @@ Route::prefix('v1')->middleware(['api.auth', 'device.recovery', 'tenant'])->grou
     Route::post('/events/{event}/guests', [FamilyEventGuestController::class, 'store']);
     Route::put('/events/{event}/guests', [FamilyEventGuestController::class, 'sync']);
     Route::patch('/events/{event}/guests/{guest}/rsvp', [FamilyEventGuestController::class, 'rsvp']);
+    Route::get('/events/{event}/expenses', [FamilyEventExpenseController::class, 'index']);
+    Route::post('/events/{event}/expenses', [FamilyEventExpenseController::class, 'store']);
+    Route::patch('/events/{event}/expenses/{expense}', [FamilyEventExpenseController::class, 'update']);
+    Route::delete('/events/{event}/expenses/{expense}', [FamilyEventExpenseController::class, 'destroy']);
 
     Route::get('/medications', [FamilyMedicationController::class, 'index']);
     Route::post('/medications', [FamilyMedicationController::class, 'store']);

@@ -26,6 +26,10 @@ class FamilyEvent extends Model
         'ends_at',
         'location',
         'status',
+        'kind',
+        'child_user_id',
+        'budget_amount',
+        'currency',
     ];
 
     protected function casts(): array
@@ -33,6 +37,7 @@ class FamilyEvent extends Model
         return [
             'starts_at' => 'datetime',
             'ends_at' => 'datetime',
+            'budget_amount' => 'decimal:2',
         ];
     }
 
@@ -48,9 +53,21 @@ class FamilyEvent extends Model
         return $this->belongsTo(User::class, 'created_by');
     }
 
+    /** @return BelongsTo<User, $this> */
+    public function child(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'child_user_id');
+    }
+
     /** @return HasMany<FamilyEventGuest> */
     public function guests(): HasMany
     {
         return $this->hasMany(FamilyEventGuest::class, 'event_id');
+    }
+
+    /** @return HasMany<FamilyEventExpense> */
+    public function expenses(): HasMany
+    {
+        return $this->hasMany(FamilyEventExpense::class, 'event_id');
     }
 }

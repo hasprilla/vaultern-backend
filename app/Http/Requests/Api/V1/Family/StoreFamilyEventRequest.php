@@ -22,6 +22,10 @@ class StoreFamilyEventRequest extends FormRequest
             'starts_at' => ['required', 'date'],
             'ends_at' => ['nullable', 'date', 'after_or_equal:starts_at'],
             'location' => ['nullable', 'string', 'max:255'],
+            'kind' => ['nullable', 'in:general,child_party'],
+            'child_user_id' => ['nullable', 'integer', 'exists:users,id'],
+            'budget_amount' => ['nullable', 'numeric', 'min:0'],
+            'currency' => ['nullable', 'string', 'max:8'],
         ];
     }
 }

@@ -22,12 +22,25 @@ class FamilyEventResource extends JsonResource
             'ends_at' => $this->ends_at?->toIso8601String(),
             'location' => $this->location,
             'status' => $this->status,
+            'kind' => $this->kind ?? 'general',
+            'child_user_id' => $this->child_user_id,
+            'budget_amount' => $this->budget_amount !== null ? (float) $this->budget_amount : null,
+            'currency' => $this->currency ?? 'COP',
             'created_by' => $this->created_by,
             'creator' => $this->whenLoaded('creator', fn () => [
                 'id' => $this->creator?->id,
                 'name' => $this->creator?->name,
             ]),
+            'child' => $this->whenLoaded('child', fn () => [
+                'id' => $this->child?->id,
+                'name' => $this->child?->name,
+            ]),
             'guests' => FamilyEventGuestResource::collection($this->whenLoaded('guests')),
+            'expenses' => FamilyEventExpenseResource::collection($this->whenLoaded('expenses')),
+            'expenses_total' => $this->when(
+                $this->relationLoaded('expenses'),
+                fn () => (float) $this->expenses->sum('amount'),
+            ),
             'rsvp_counts' => $this->when($this->relationLoaded('guests'), function () {
                 $all = $this->guests;
 

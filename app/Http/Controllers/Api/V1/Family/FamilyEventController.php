@@ -31,8 +31,15 @@ class FamilyEventController extends Controller
 
     public function index(Request $request): JsonResponse
     {
+        $kind = $request->query('kind');
+        $kindFilter = is_string($kind) && $kind !== '' ? $kind : null;
+
         return FamilyEventResource::collection(
-            $this->listEvents->execute($request->user(), $this->perPage($request)),
+            $this->listEvents->execute(
+                $request->user(),
+                $this->perPage($request, 50),
+                $kindFilter,
+            ),
         )->response();
     }
 

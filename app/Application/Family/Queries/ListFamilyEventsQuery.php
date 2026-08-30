@@ -10,14 +10,19 @@ use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
 final class ListFamilyEventsQuery
 {
-    public function execute(User $actor, int $perPage = 20): LengthAwarePaginator
+    public function execute(User $actor, int $perPage = 20, ?string $kind = null): LengthAwarePaginator
     {
         abort_if($actor->family_id === null, 403, 'Sin familia');
 
-        return FamilyEvent::query()
+        $q = FamilyEvent::query()
             ->where('family_id', $actor->family_id)
-            ->with(['creator:id,name', 'guests'])
-            ->orderByDesc('starts_at')
-            ->paginate($perPage);
+            ->with(['creator:id,name', 'guests', 'child:id,name', 'expenses'])
+            ->orderByDesc('starts_at');
+
+        if ($kind !== null && $kind !== '') {
+            $q->where('kind', $kind);
+        }
+
+        return $q->paginate($perPage);
     }
 }

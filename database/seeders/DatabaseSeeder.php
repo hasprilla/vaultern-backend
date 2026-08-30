@@ -32,6 +32,7 @@ class DatabaseSeeder extends Seeder
             QaVolumeTeacherTasksSeeder::class,
             QaVolumeGroupsSeeder::class,
             QaFamilyEventsSeeder::class,
+            QaChildPartyEventsSeeder::class,
         ]);
     }
 }
