@@ -15,6 +15,14 @@ class DatabaseSeeder extends Seeder
             QaUsersSeeder::class,
             QaMultiSchoolsSeeder::class,
             ColombiaCurriculumSeeder::class,
+            QaMultiSchoolsClassesSeeder::class,
+            QaSchoolSchedulesSeeder::class,
+            QaSchoolAttendanceSeeder::class,
+            QaSchoolPsychSeeder::class,
+            QaSchoolHealthSeeder::class,
+            QaSchoolBroadcastsSeeder::class,
+            QaSchoolAnnouncementsExtraSeeder::class,
+            QaSchoolMeetingsTasksExtraSeeder::class,
         ]);
     }
 }
